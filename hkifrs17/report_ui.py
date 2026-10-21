@@ -48,6 +48,10 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
 .report-table th { background:#00338D; color:white; text-align:left; padding:7px 9px; border:1px solid #D8DCE5; }
 .report-table td { background:white; color:#30333D; padding:6px 9px; border:1px solid #D8DCE5; }
 .report-table tr:nth-child(even) td { background:#F4F6FB; }
+.report-table tbody tr.tracked-company td { border-top:1.5px solid #00338D; border-bottom:1.5px solid #00338D; color:#00338D; font-weight:700; }
+.report-table tbody tr.tracked-company td:not(.unavailable) { background:rgba(0,51,141,.07); }
+.report-table tbody tr.tracked-company td:first-child { border-left:1.5px solid #00338D; }
+.report-table tbody tr.tracked-company td:last-child { border-right:1.5px solid #00338D; }
 .discount-rate-table { table-layout:fixed; font-size:clamp(10px,.9vw,13px); }
 .discount-rate-table th { text-align:center; }
 .discount-rate-table th:first-child { width:23%; text-align:left; }
@@ -62,6 +66,10 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
 .highlights-table td:first-child { text-align:left; }
 .highlights-table tbody tr:nth-child(even) td { background:#F5F6F8; }
 .highlights-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
+.highlights-table tbody tr.tracked-company td { border-top:1.5px solid #00338D; border-bottom:1.5px solid #00338D; color:#00338D; font-weight:700; }
+.highlights-table tbody tr.tracked-company td:not(.unavailable) { background:rgba(0,51,141,.07); }
+.highlights-table tbody tr.tracked-company td:first-child { border-left:1.5px solid #00338D; }
+.highlights-table tbody tr.tracked-company td:last-child { border-right:1.5px solid #00338D; }
 [data-testid="stMetric"] { background:white; border:1px solid #E1E4EA; border-radius:8px; padding:12px; }
 @media (max-width: 800px) { .block-container { padding:1rem 1rem 2rem; } }
 .report-cover { position:relative; aspect-ratio:16/9; width:100%; background:#062A68; margin:14px 0 30px; overflow:hidden; }
@@ -285,14 +293,27 @@ def sidebar_report_navigation(modules: tuple[ReportModule, ...], *, key: str,
     return False, visible
 
 
-def render_report_table(frame: pd.DataFrame) -> None:
+def render_report_table(frame: pd.DataFrame,
+                        tracked_company: str | None = None) -> None:
     """Full HTML table stays visible in both screen and all-chart print views."""
     if frame.empty:
         return
-    st.html(frame.to_html(index=False, escape=True, border=0, classes="report-table"))
+    markup = frame.to_html(index=False, escape=True, border=0, classes="report-table")
+    if tracked_company and "Company" in frame.columns:
+        before, divider, body = markup.partition("<tbody>")
+        if divider:
+            rows = body.split("<tr>")
+            body = rows[0] + "".join(
+                ('<tr class="tracked-company">' if company == tracked_company else '<tr>')
+                + row_markup
+                for company, row_markup in zip(frame["Company"].astype(str), rows[1:])
+            )
+            markup = before + divider + body
+    st.html(markup)
 
 
-def render_discount_rate_table(frame: pd.DataFrame) -> None:
+def render_discount_rate_table(frame: pd.DataFrame,
+                               tracked_company: str | None = None) -> None:
     """English year columns with readable multiline currency and basis ranges."""
     if frame.empty:
         return
@@ -304,12 +325,14 @@ def render_discount_rate_table(frame: pd.DataFrame) -> None:
             value = str(row[column])
             css = ' class="unavailable"' if value == "Not disclosed" else ""
             cells.append(f"<td{css}>{escape(value).replace(chr(10), '<br>')}</td>")
-        body.append("<tr>" + "".join(cells) + "</tr>")
+        row_class = ' class="tracked-company"' if row.get("Company") == tracked_company else ""
+        body.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
     st.html('<table class="report-table discount-rate-table"><thead><tr>'
             + headers + "</tr></thead><tbody>" + "".join(body) + "</tbody></table>")
 
 
-def render_financial_highlights_table(frame: pd.DataFrame, period: str) -> None:
+def render_financial_highlights_table(frame: pd.DataFrame, period: str,
+                                      tracked_company: str | None = None) -> None:
     """Compact eight-ratio comparison with explicit unavailable cells."""
     if frame.empty:
         return
@@ -328,7 +351,8 @@ def render_financial_highlights_table(frame: pd.DataFrame, period: str) -> None:
             value = row[label]
             cells.append('<td class="unavailable">Unavailable</td>' if pd.isna(value)
                          else f"<td>{float(value):.0f}%</td>")
-        body.append("<tr>" + "".join(cells) + "</tr>")
+        row_class = ' class="tracked-company"' if row["Company"] == tracked_company else ""
+        body.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
     st.html('<div class="highlights-wrap"><table class="highlights-table"><thead><tr>'
             + "".join(headers) + "</tr></thead><tbody>" + "".join(body)
             + "</tbody></table></div>")
