@@ -94,7 +94,9 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
     max-width:100%!important;
   }
   [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] .chart-wrapper > canvas,
-  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] .chart-wrapper > svg {
+  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] .chart-wrapper > svg,
+  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] > canvas.marks,
+  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] > svg.marks {
     display:block;
     width:100%!important;
     max-width:100%!important;
