@@ -75,6 +75,33 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
 .report-back p { max-width:600px; color:#344869; }
 .report-back small { position:absolute; bottom:7%; color:#56657e; }
 .report-page-break { break-before:page; height:0; }
+@media screen {
+  /* Vega-Lite facet panels have fixed drawing widths. Scale the complete
+     drawing to the available report column so the sidebar cannot cover it. */
+  [class*="st-key-report_visual_"] [data-testid="stElementContainer"]:has([data-testid="stVegaLiteChart"]),
+  [class*="st-key-report_visual_"] div:has(> [data-testid="stVegaLiteChart"]),
+  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] {
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+  }
+  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"].has-actions {
+    padding-left:38px;
+  }
+  [class*="st-key-report_visual_"] [class*="st-key-performance_ratio_chart_"],
+  [class*="st-key-report_visual_"] .st-key-tax_profit_chart {
+    width:100%!important;
+    max-width:100%!important;
+  }
+  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] .chart-wrapper > canvas,
+  [class*="st-key-report_visual_"] [data-testid="stVegaLiteChart"] .chart-wrapper > svg {
+    display:block;
+    width:100%!important;
+    max-width:100%!important;
+    height:auto!important;
+    margin-inline:auto;
+  }
+}
 @media print {
   @page { size:338.67mm 190.5mm; margin:10mm; }
   :root { --report-content-height:150mm; }
