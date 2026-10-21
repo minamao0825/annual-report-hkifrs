@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from base64 import b64encode
+from functools import lru_cache
 from html import escape
+from pathlib import Path
 import re
 
 import pandas as pd
@@ -61,7 +64,8 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
 .highlights-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
 [data-testid="stMetric"] { background:white; border:1px solid #E1E4EA; border-radius:8px; padding:12px; }
 @media (max-width: 800px) { .block-container { padding:1rem 1rem 2rem; } }
-.report-cover { position:relative; aspect-ratio:16/9; width:100%; background:#062A68 url('/app/static/annual_cover.png') center/cover no-repeat; margin:14px 0 30px; overflow:hidden; }
+.report-cover { position:relative; aspect-ratio:16/9; width:100%; background:#062A68; margin:14px 0 30px; overflow:hidden; }
+.report-cover-image { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
 .report-cover-title { position:absolute; left:7%; bottom:15%; width:80%; color:white; text-shadow:0 2px 12px rgba(0,12,50,.6); }
 .report-cover-title h1 { color:white!important; font-size:clamp(33px,4vw,60px); border:0; margin:0 0 12px; }
 .report-cover-title p { color:white!important; font-size:clamp(14px,1.6vw,24px); margin:4px 0; }
@@ -347,8 +351,15 @@ window.addEventListener('afterprint', () => {
 
 
 def cover(title: str, subtitle: str, note: str) -> None:
-    st.html(f'<div class="report-cover"><div class="report-cover-title"><h1>{escape(title)}</h1>'
+    st.html(f'<div class="report-cover"><img class="report-cover-image" src="{_cover_image_uri()}" alt="">'
+            f'<div class="report-cover-title"><h1>{escape(title)}</h1>'
             f'<p>{escape(subtitle)}</p><p>{escape(note)}</p></div></div>')
+
+
+@lru_cache(maxsize=1)
+def _cover_image_uri() -> str:
+    image_path = Path(__file__).resolve().parents[1] / "static" / "annual_cover.png"
+    return "data:image/png;base64," + b64encode(image_path.read_bytes()).decode("ascii")
 
 
 def back_cover() -> None:
