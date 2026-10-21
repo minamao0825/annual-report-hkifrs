@@ -85,7 +85,8 @@ with st.container(key="report_screen_controls"):
             periods = st.multiselect("Comparison periods", period_options, default=period_options)
         with second[2]:
             tracking_options = [None, *companies]
-            if st.session_state.get("step6_tracked_company") not in tracking_options:
+            if ("step6_tracked_company" not in st.session_state or
+                    st.session_state["step6_tracked_company"] not in tracking_options):
                 st.session_state["step6_tracked_company"] = companies[0] if companies else None
             tracked_company = st.selectbox(
                 "Tracked insurer", tracking_options,
