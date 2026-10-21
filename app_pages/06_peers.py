@@ -7,7 +7,7 @@ from itertools import groupby
 import pandas as pd
 import streamlit as st
 
-from hkifrs17.charts import (company_year_comparison_bars, csm_maturity_lines, financial_performance_peer_dots, peer_group_panels,
+from hkifrs17.charts import (company_year_comparison_bars, csm_maturity_lines, financial_performance_peer_dots, frame_peer_company_panels, peer_group_panels,
                             peer_ratio_module_panels, peer_revenue_stack_panels, tax_profit_bars)
 from hkifrs17.data import standardize_hkd
 from hkifrs17.demo import demo_records
@@ -78,11 +78,20 @@ with st.container(key="report_screen_controls"):
         if {"Sun Life Hong Kong", "Sun Life Hong Kong (Consolidated)"}.issubset(company_options):
             st.caption("Sun Life 2024 consolidated and 2025 company figures are separate chart identities because their reporting scopes differ.")
         period_options = sorted(cohort_rows["Period end"].astype(str).unique())
-        second = st.columns([2, 2])
+        second = st.columns([2, 2, 2])
         with second[0]:
             companies = st.multiselect("Displayed insurers", company_options, default=company_options)
         with second[1]:
             periods = st.multiselect("Comparison periods", period_options, default=period_options)
+        with second[2]:
+            tracking_options = [None, *companies]
+            if st.session_state.get("step6_tracked_company") not in tracking_options:
+                st.session_state["step6_tracked_company"] = companies[0] if companies else None
+            tracked_company = st.selectbox(
+                "Tracked insurer", tracking_options,
+                format_func=lambda value: "None" if value is None else value,
+                key="step6_tracked_company",
+            )
 
         third = st.columns([1, 1, 1])
         with third[0]:
@@ -114,6 +123,9 @@ with st.container(key="report_screen_controls"):
     if rows.empty:
         st.info("No reviewed cells match the selected companies and periods.")
         st.stop()
+    tracked_scopes = tuple(cohort_rows.loc[
+        cohort_rows["Company"].eq(tracked_company), "Scope"
+    ].astype(str).unique()) if tracked_company else ()
 
     if order_by == "Latest service margin":
         latest = periods[-1]
@@ -156,6 +168,13 @@ with st.container(key="report_screen_summary"):
     st.caption("The charts below follow the sidebar selection. Choose All charts for the complete report. Movement charts show the latest selected year; each amount chart has one responsive panel per insurer.")
 
 
+def _show_chart(chart, *, width: str = "stretch") -> None:
+    framed = frame_peer_company_panels(
+        chart, tracked_company=tracked_company, tracked_scopes=tracked_scopes,
+    )
+    st.altair_chart(framed, width=width)
+
+
 def _render_module(module) -> None:
     data = module_rows(rows, module)
     plot_data = movement_chart_rows(data, module)
@@ -179,7 +198,7 @@ def _render_module(module) -> None:
                 if excluded:
                     st.caption("USD amount panels with unavailable year-end rates: " + ", ".join(excluded))
                 if chart is not None:
-                    st.altair_chart(chart, width="stretch")
+                    _show_chart(chart)
                 st.caption(
                     "Balance-sheet composition · Total liabilities + equity = total assets. "
                     + ("HKD panels share one amount scale." if display_mode == "HKD converted"
@@ -190,6 +209,7 @@ def _render_module(module) -> None:
                 render_financial_highlights_table(
                     financial_highlights_table(cohort_rows, companies, periods[-1],
                                                include_source_comparatives=not preview), periods[-1],
+                    tracked_company=tracked_company,
                 )
                 st.caption("Percentages are rounded to whole numbers. Grey cells mean a matching source input is unavailable.")
                 if not preview and "Sun Life Hong Kong" in companies and periods[-1].startswith("2025"):
@@ -207,7 +227,7 @@ def _render_module(module) -> None:
                     )
                     if chart is not None:
                         with st.container(horizontal_alignment="center", key=f"performance_ratio_chart_group_{group_number}"):
-                            st.altair_chart(chart, width="content")
+                            _show_chart(chart, width="content")
                     else:
                         st.caption("Missing inputs · Matching reviewed ratio components are unavailable.")
                     if group_number == 2:
@@ -222,7 +242,7 @@ def _render_module(module) -> None:
                 with st.container(key="report_figure_six_dimensional_charts_yield"):
                     st.markdown(f"#### {module.title} · Investment yield")
                     with st.container(horizontal_alignment="center", key="performance_ratio_chart_yield"):
-                        st.altair_chart(yield_chart, width="content")
+                        _show_chart(yield_chart, width="content")
                     st.caption("Investment yield uses each insurer's disclosed rate; compare definitions before ranking insurers.")
         elif module.module_id in RATIO_MODULE_LABELS and module.module_id not in COMPANY_YEAR_COMPARISON_IDS:
             chart, _gaps = peer_ratio_module_panels(
@@ -234,11 +254,12 @@ def _render_module(module) -> None:
                 color_by_period=module.module_id in YEAR_COLORED_MODULE_IDS,
             )
             if chart is not None:
-                st.altair_chart(chart, width="stretch")
+                _show_chart(chart)
             else:
                 st.caption("Missing inputs · Matching reviewed ratio components are unavailable for these insurers and periods.")
         elif module.module_id == "discount_rate":
-            render_discount_rate_table(discount_rate_summary(data, companies, periods))
+            render_discount_rate_table(discount_rate_summary(data, companies, periods),
+                                       tracked_company=tracked_company)
             st.caption("Each range spans the disclosed 1Y, 5Y, 10Y, 15Y and 20Y spot rates. "
                        "Currencies and risk-free versus illiquidity-premium assumptions are kept separate.")
         elif module.module_id == "confidence_level":
@@ -247,11 +268,13 @@ def _render_module(module) -> None:
                 columns = ["Company", "Period end", "Metric", "Value (millions)", "Currency"]
                 if display_mode == "HKD converted":
                     columns.append("HKD value (millions)")
-                render_report_table(cells[[*columns, "PDF page"]])
+                render_report_table(cells[[*columns, "PDF page"]],
+                                    tracked_company=tracked_company)
         elif module.module_id == "csm_maturity_table":
             maturity = {
                 kind: csm_maturity_lines(
                     plot_data, kind=kind, companies=companies, transparent=transparent,
+                    tracked_company=tracked_company,
                 )
                 for kind in ("Insurance", "Reinsurance")
             }
@@ -264,7 +287,7 @@ def _render_module(module) -> None:
                         if kind == available[0]:
                             st.markdown(f"#### {module.title}")
                         st.markdown(f"**{kind} CSM**")
-                        st.altair_chart(chart, width="stretch")
+                        _show_chart(chart)
                         if kind == available[-1]:
                             st.caption(f"Latest available year shown: {max(plot_data['Period end'].astype(str))[:4]}YE. "
                                        "Lines show cumulative share through 1, 5 and 10 years where disclosed. "
@@ -291,7 +314,7 @@ def _render_module(module) -> None:
             if excluded:
                 st.caption("USD amount panels with unavailable year-end rates: " + ", ".join(excluded))
             if chart is not None:
-                st.altair_chart(chart, width="stretch")
+                _show_chart(chart)
                 st.caption(
                     "Percentage labels use each insurer's PAA + non-PAA revenue total. Hover for amounts and source pages."
                     if is_method_split else
@@ -340,7 +363,7 @@ def _render_module(module) -> None:
             if chart is not None:
                 if summary:
                     st.caption(summary)
-                st.altair_chart(chart, width="stretch")
+                _show_chart(chart)
             else:
                 st.caption("Missing inputs · No matching reviewed values are available for these indicators and periods.")
         elif module.module_id == "tax_profit":
@@ -354,7 +377,7 @@ def _render_module(module) -> None:
                 st.caption("USD amounts with unavailable year-end rates: " + ", ".join(excluded))
             if chart is not None:
                 with st.container(horizontal_alignment="center", key="tax_profit_chart"):
-                    st.altair_chart(chart, width="content")
+                    _show_chart(chart, width="content")
             else:
                 st.caption("Missing inputs · No matching reviewed pre-tax profit or profit values are available.")
         else:
@@ -380,7 +403,7 @@ def _render_module(module) -> None:
             if excluded:
                 st.caption("USD amount panels with unavailable year-end rates: " + ", ".join(excluded))
             if chart is not None:
-                st.altair_chart(chart, width="stretch")
+                _show_chart(chart)
                 if module.module_id in LATEST_YEAR_CHART_IDS:
                     st.caption(f"Latest available year shown: {max(plot_data['Period end'].astype(str))[:4]}YE.")
                 if stacked:
@@ -400,7 +423,7 @@ def _render_module(module) -> None:
         if not bridge.empty:
             with st.container(key="report_table_inv_profit"):
                 st.markdown("**Profit-or-loss reconciliation**")
-                render_report_table(bridge)
+                render_report_table(bridge, tracked_company=tracked_company)
                 st.caption("Original statement currencies, millions. The investment-contract liability movement "
                            "is calculated from the reported lines; it matches the separately disclosed FWD and YF line. "
                            "Sun Life has no such movement in this subtotal.")
