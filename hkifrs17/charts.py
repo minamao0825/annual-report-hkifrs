@@ -75,6 +75,47 @@ def _company_scope_label(name: str, scope: str) -> str:
     return f"{company} ({normalized}){separator}{currency}"
 
 
+def frame_peer_company_panels(
+    chart: alt.TopLevelMixin | None, *, tracked_company: str | None = None,
+    tracked_scopes: tuple[str, ...] = (),
+) -> alt.TopLevelMixin | None:
+    """Frame company facets and tint the selected insurer's plotting panel."""
+    if chart is None or not isinstance(chart, alt.FacetChart):
+        return chart
+    facet_field = str(chart.facet.shorthand).split(":", 1)[0]
+    if facet_field not in {"Company", "Panel"}:
+        return chart
+
+    framed = chart
+    framed.config.view = alt.ViewConfig(
+        fill="transparent", stroke="#D8DCE5", strokeWidth=1, strokeOpacity=1,
+    )
+    if tracked_company and tracked_scopes:
+        tracked_entities = {
+            _company_scope_label(tracked_company, scope).split(" · ")[0]
+            for scope in tracked_scopes
+        }
+        records = chart.data.to_dict("records") if isinstance(chart.data, pd.DataFrame) else []
+        tracked_panels = sorted({
+            str(row[facet_field]) for row in records
+            if facet_field in row
+            and str(row[facet_field]).split(" · ")[0] in tracked_entities
+        })
+        if tracked_panels and isinstance(framed.spec, alt.LayerChart):
+            # A single aggregate row draws one backdrop per matching facet.
+            backdrop = (alt.Chart()
+                        .transform_filter(alt.FieldOneOfPredicate(
+                            field=facet_field, oneOf=tracked_panels,
+                        ))
+                        .transform_aggregate(panel_rows="count()", groupby=[facet_field])
+                        .mark_rect(fill=BLUE, fillOpacity=0.07,
+                                   stroke=BLUE, strokeWidth=1.8)
+                        .encode(x=alt.value(0), x2=alt.value(framed.spec.width),
+                                y=alt.value(0), y2=alt.value(framed.spec.height)))
+            framed.spec.layer.insert(0, backdrop)
+    return framed
+
+
 def _expense_display_rows(rows: pd.DataFrame, mode: str | None) -> pd.DataFrame:
     """Change expense chart signs without changing the accounting source rows."""
     if mode is None:
@@ -673,6 +714,7 @@ def csm_maturity_curve_rows(frame: pd.DataFrame, *, kind: str,
 
 def csm_maturity_lines(frame: pd.DataFrame, *, kind: str,
                        companies: list[str], transparent: bool = True,
+                       tracked_company: str | None = None,
                        ) -> tuple[alt.TopLevelMixin | None, list[str]]:
     """Compare cumulative recognition curves and label only outermost series."""
     rows, missing = csm_maturity_curve_rows(frame, kind=kind, companies=companies)
@@ -689,8 +731,9 @@ def csm_maturity_lines(frame: pd.DataFrame, *, kind: str,
         rows.loc[rows["Company"].eq(lowest) & rows["Year"].gt(0), "Outer line"] = "Lowest"
     rows["Share label"] = rows["Cumulative share"].map(lambda value: f"{value:.1%}")
     scale = alt.Scale(domain=order, range=[
+        BLUE if company == tracked_company else
         KPMG_BRIGHT_CHART_COLORS[index % len(KPMG_BRIGHT_CHART_COLORS)]
-        for index in range(len(order))
+        for index, company in enumerate(order)
     ])
     x = alt.X("Year:Q", title=None, scale=alt.Scale(domain=[0, 10]),
               axis=alt.Axis(values=[0, 1, 5, 10], labelAngle=0,
