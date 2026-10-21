@@ -1,0 +1,26 @@
+[
+  {
+    "document_id": "FWD_2024",
+    "company_id": "FWD",
+    "company": "FWD Life Bermuda",
+    "legal_entity": "FWD Life Insurance Company (Bermuda) Limited",
+    "scope": "Company",
+    "period_end": "2024-12-31",
+    "currency": "USD",
+    "source_unit": "USD thousands",
+    "pdf_file": "FWD-Life-Insurance-Company-Bermuda-Limited-2024-Financial-Statement.pdf",
+    "note": "2024 current-year column; audited company financial statements."
+  },
+  {
+    "document_id": "YF_2024",
+    "company_id": "YF",
+    "company": "YF Life",
+    "legal_entity": "YF Life Insurance International Limited",
+    "scope": "Consolidated",
+    "period_end": "2024-12-31",
+    "currency": "HKD",
+    "source_unit": "HKD",
+    "pdf_file": "YF Life_FS_2024.pdf",
+    "note": "2024 current-year column; audited consolidated financial statements."
+  }
+]

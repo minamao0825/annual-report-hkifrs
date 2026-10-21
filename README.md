@@ -1,1 +1,77 @@
-# annual-report-hkifrs
+# HK IFRS 17 financial statements explorer
+
+An English-language Streamlit demo for Hong Kong insurer annual financial statements. Its seven steps sit in a horizontal strip below the platform title, matching the existing annual-report platform: filing monitor, locate and extract, review, publish, integrate, insurer explorer, and peer comparison. The report pages use the original KPMG-blue cover artwork and related visual style.
+
+## Start
+
+From this folder:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m streamlit run ifrs17_app.py
+```
+
+The pilot PDFs live in `disclosures/pilot`. Four source-page transcriptions are embedded in `hkifrs17/demo.py` and preloaded into `data/drafts/` as **Pending**, not published data. The insurer and peer pages show them only when **Preview unpublished pilot transcriptions** is enabled. To use reviewed data, confirm the PDF source and approve `Verified` cells in Step 2, publish the approved filing in Step 3, then build the shared insurer dataset in Step 4.
+
+Step 0 stores the editable insurer website list in `config/insurer_links.xlsx`. Edit the table in the app or download and re-upload the Excel workbook. The scan checks public pages for a reporting year and report wording; every match still needs a PDF cover and audit-opinion review. Some sites load dynamically or block automated requests. The four initial report-page links were checked against the [YF Life financial information page](https://www.yflife.com/en/about-us/financial-information/), [Bermuda Monetary Authority financial statements page](https://www.bma.bm/documents-centre/financial-statements), [CTF Life regulatory disclosures page](https://corpweb.ctflife.com.hk/en/support/regulatory-disclosures), and [Sun Life Hong Kong audited statements page](https://www.sunlife.com.hk/en/about-us/financials/audited-financial-statements/).
+
+Step 1's suggested page numbers for the four pilot PDFs are manually checked **physical PDF pages** stored in `hkifrs17/catalog.py`. They are not inferred from a new upload. Physical page 1 means the first page in the file, so a printed page number may differ. **Vision model settings** and **Model-assisted page discovery** appear immediately after filing selection. The separate manual page inspector and thumbnail strip have been removed; original full pages are displayed beside the model's candidate-page review.
+
+**Model-assisted page discovery** can scan image-only PDFs as well as text PDFs. Enter a physical PDF page range and target table types, configure the vision service in **Vision model settings**, review the stated number of numbered contact-sheet requests, and explicitly consent before pressing **Locate candidate pages**. The model returns page/table leads with visible evidence and confidence; it does not extract numbers or change the draft. The review area follows the source platforms' two-column layout: editable page numbers for every target table on the left and the matching original full PDF page on the right. A table may have comma-separated continuation pages, which can be switched in the preview. After checking the headings, year, group/company scope, method and columns, press **Confirm all reviewed table pages** once. Changed page numbers block extraction until reconfirmed. The confirmed table-page pairs appear in a read-only list; after consenting to send them to the model service, press **Extract all confirmed tables**. Discovery results from several ranges accumulate for the active browser session. Unassessed ranges are shown if a model request fails.
+
+**Extract confirmed tables** processes every confirmed table-page pair separately and displays progress through the batch. A failed or empty table extraction is recorded and the next table still runs; the final summary lists each failed table, page, and reason. If two table types share a physical page, separate model requests isolate their results and failures. For a 2025 filing, Step 1 locates current-year table pages and accepts only 2025 data from the model response; comparative-only pages and columns are excluded. A prior-year opening balance is allowed only when it is the explicitly labelled opening row of a 2025 rollforward. FWD has pre-checked leads for 2025 primary statements, revenue, expenses, investment assets, and insurance/reinsurance reconciliations. YF and Sun Life have pre-checked primary-statement continuation pages; their image-only note pages still require model discovery and visual confirmation. Every extracted value starts `Pending`, and reviewed cells remain intact on later batches.
+
+The **Chart-driven indicator and source-table map** in Step 1 traces all 42 modules in the source annual-report Step 7 to an English HK disposition: Reuse, Adapt, Conditional, or Exclude. It names the required metrics and source-table types before page discovery. The expanded dictionary contains 211 English metrics. The source 42-module order was checked against the original Step 7 workbook; Step 5 and Step 6 display 40 applicable modules plus 26 supplementary HKFRS 17 disclosure groups. The mapping is a target for extraction and review; it does not mean that every filing discloses every metric or that the metrics have already been extracted. For the detailed FWD page inventory and important accounting boundaries, see [Metric and page mapping](docs/metric_mapping.md).
+
+Step 2 has three parts: verify source cells, assess each period's check plan, and resolve the four-state checklist. The `Records` sheet has dropdowns for `Audit status` and `Review status`; `Check plan` has dropdowns for applicability, measurement method, note scope and formula basis. Importing a workbook applies the same validations as editing in the app. The `Checks` sheet is a calculated snapshot; importing it does not override the platform's results.
+
+Every filing period shows primary-statement coverage, the insurance service bridge, the balance-sheet equation, three optional cross-table checks, CSM and contract rollforwards, insurance revenue components, PAA/non-PAA closing splits, and note-cohort net-balance and measurement-component checks. Each result is **Pass**, **Difference**, **Missing inputs**, or **Not applicable**. Optional checks start as `To assess` and show `Missing inputs` until the reviewer marks them applicable with enough source fields or documents a reason for `Not applicable`. Approval, publication and integration require every result to be Pass or documented Not applicable. The service bridge can subtract positively displayed expenses; a cross-table check can reverse a note's liability sign without changing the original transcribed value. Confirm entity/group, currency, measurement method, note cohort and sign presentation. A note's net-balance rollforward stays separate from a gross balance-sheet asset or liability.
+
+The FWD **unpublished preview** contains manually checked note 4 and note 13 transcription leads with their own physical PDF pages, including 2024 values on separate pages where necessary. These rows are `Pending`; Step 2 source review is still required before approval. If an older FWD draft already exists, Step 1's optional **Pilot transcription aids** section offers **Add FWD note 4/13 transcription leads** to append only missing Pending cells while preserving every existing draft cell. A previous review workbook or approved filing gains the new optional `To assess` checks when reopened and must be reassessed before publication.
+
+Step 5 and Step 6 now share the original annual-report Step 7 inventory in the same order: 40 applicable source modules, with the mainland expense-classification and proprietary adjusted-net-assets modules excluded. The 26 supplementary chart groups preserve additional HKFRS 17 note metrics already in the platform. Both pages keep the source sidebar logic: **Primary module → Secondary module → Chart**, plus **All charts (print/export)**. The sidebar navigates while every chart remains on the page. Summary and detail modules include print-ready tables. Period is the horizontal axis and different colored columns represent disclosed indicators. Movement charts show only the latest selected year; the two comparative-year movement charts are omitted from navigation, while historical source cells remain in tables. Step 6 retains its core configuration panel for the year-end cohort, reporting scope, insurers, comparison periods, company order, currency, unit, and chart labels, and uses one responsive chart panel per insurer throughout the expanded modules. Native-currency panels retain independent scales. In HKD comparison mode, every amount chart shares one vertical scale across insurers and uses each calendar year's 31 December Federal Reserve H.10 USD/HKD rate. Select **All charts (print/export)** or enable **Full report layout** for the cover and back cover, then use **Print all charts / Save PDF** with landscape paper and background graphics.
+
+Step 5 has a visible **Choose insurer → Display selected insurer** control and an **Upload reviewed Excel data for Steps 5 and 6** panel. Upload a standard workbook with a `Records` sheet and optional `Check plan`; the platform recomputes identities, units and checks. `Verified` / `Reported` cells are required, the three primary checks must pass for each filing period, and a `Difference` blocks import. Optional checks that lack note inputs remain visibly `Missing inputs`. Imported cells are saved on the local machine and replace the same document's prior external or integrated snapshot in both report pages, while unrelated insurers remain available. A new external insurer can be registered from the workbook's filing identity columns; its original PDF page can only be opened when its source PDF is also registered in the platform.
+
+The current [reviewed 2024–2025 workbook](outputs/HK_IFRS17_FWD_YF_SunLife_2024_2025_hkd_company.xlsx) contains 665 source-checked cells across six insurer periods. Sun Life Hong Kong 2024 and 2025 use the same company scope and the 2025 filing: 2024 is the unaudited comparative column, and 2025 is the audited current-year column. The former 2024 consolidated Sun Life rows have been removed. The **Missing review** sheet traces 31 formerly open checks: 15 now `Pass`, 12 are documented `Not applicable` gross-balance rollforwards, and 4 YF PAA method-split checks remain `Missing inputs`. Totals across 102 checks are 86 `Pass`, 12 `Not applicable`, 4 `Missing inputs`, and 0 `Difference`; all 18 mandatory primary-statement checks pass. FWD and YF retain their audited 2024 source filings. The [2025-only workbook](outputs/HK_IFRS17_FWD_YF_SunLife_2025_verified.xlsx) remains available as an earlier snapshot.
+
+The workbook includes six source-checked YF Life cells for new business CSM, CSM release and zero insurance contract assets. Its **Financial Highlights** sheet shows eight English indicators. Sun Life Hong Kong 2024 company comparatives are now included in canonical `Records` with their physical page references and unaudited status.
+
+The non-PAA PVFCF + risk adjustment + CSM checks now target the same non-PAA closing cohort. The YF reports explicitly show non-PAA measurement components, but do not separately give the full PAA contract-balance subtotal needed for four whole-contract method-split checks; their PAA incurred-claims columns cover only part of that population. The YF insurance statement balance also deducts assets for insurance acquisition cash flows from the gross contract-balance note. Those four checks remain visibly open instead of using a residual or mixing gross and net amounts.
+
+Sun Life's 2024 company comparative values were rechecked in the 2025 financial statements, including primary statements and notes 7, 8 and 20. The 2024 consolidated statements are no longer part of the current workbook or Step 5/6 data store. For example, the 2024 company-only profit is HKD 774 million and total assets are HKD 116,664 million; these differ from the former consolidated values.
+
+## Important data rules
+
+- Source amounts and units are preserved. Monetary chart values are normalised to native-currency millions; discount rates and risk-adjustment confidence are percentage points.
+- December and June year ends are separate comparison cohorts.
+- FWD's USD amounts are converted to HKD using that record's calendar-year 31 December Federal Reserve H.10 rate. The native USD amount is preserved. If a new year's rate is unavailable, the USD amount is omitted from HKD charts until the official observation is published.
+- Current-year 2024 figures are taken from the 2024 reports, even where a later report presents a different comparative amount. The source report and PDF page are retained for each cell.
+- Charts and exports in integrated mode use `Verified` and `Reported` cells only. Publishing a changed source filing makes the prior integration stale until Step 4 is run again.
+- Step 5/6 combine the Step 4 integration with the reviewed external-data overlay. The overlay remains available even if Step 4 has not been run. An external workbook is treated as the complete snapshot for each Document ID it contains; it replaces that document's integrated rows without changing the published store.
+- Page discovery sends only the page range explicitly consented to in Step 1 as numbered image sheets. Extraction has a separate consent and sends only the confirmed table-page images. Both use the user-configured OpenAI-compatible service; credentials stay in the active Streamlit session, and extracted values are always `Pending`.
+- For Moonshot `kimi-k2.6`, Step 1 defaults to fast response (thinking disabled) and a 300-second response timeout. The timeout is adjustable; a timeout leaves the existing draft untouched and does not trigger an automatic retry.
+
+## File structure
+
+| Path | Purpose |
+| --- | --- |
+| `ifrs17_app.py`, `app_pages/` | Seven English UI pages |
+| `config/insurer_links.xlsx`, `hkifrs17/monitor.py` | Editable insurer watchlist and public-page scan |
+| `hkifrs17/catalog.py`, `hkifrs17/metric_blueprint.py` | Pilot filings, English metric dictionary, and 42-module chart-to-source map |
+| `hkifrs17/extraction_plan.py` | Confirmed-table batch extraction and safe draft merging |
+| `hkifrs17/locator.py` | Numbered PDF contact sheets and model-assisted candidate page discovery |
+| `hkifrs17/demo.py` | Source-page pilot transcriptions for preview |
+| `hkifrs17/pdf.py` | PDF rendering, text parsing and optional page-level vision extraction |
+| `hkifrs17/data.py`, `hkifrs17/checks.py` | Unit conversion, review plan and four-state reconciliation |
+| `hkifrs17/review.py` | Excel review round trip |
+| `hkifrs17/storage.py` | Local drafts, approvals and versioned published records |
+| `hkifrs17/external.py`, `data/external_records.json` | Reviewed external Excel import and shared Step 5/6 overlay |
+| `outputs/HK_IFRS17_FWD_YF_SunLife_2025_verified.xlsx` | Three-insurer 2025 source cells, checks and coverage |
+| `hkifrs17/charts.py`, `hkifrs17/report.py`, `hkifrs17/report_ui.py` | Charts, reviewed HTML report, and print layout |
+| `static/annual_cover.png` | Original annual-report cover artwork |
+| `disclosures/pilot/` | Four supplied PDFs |
+
+Local storage in `data/` is intended for a single-machine demo. For shared use, replace it with managed storage and role-based access. The public-page scan depends on network access from the running computer and does not automatically download or approve filings. A complete IFRS 17 note taxonomy and production-grade OCR benchmarking remain future work.
+
+

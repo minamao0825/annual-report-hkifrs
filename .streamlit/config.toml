@@ -1,0 +1,24 @@
+[theme]
+base = "light"
+primaryColor = "#FF4B4B"
+backgroundColor = "#F4F6FB"
+secondaryBackgroundColor = "#EEF0F5"
+textColor = "#30333D"
+linkColor = "#005DAA"
+borderColor = "#D8DCE5"
+dataframeHeaderBackgroundColor = "#F4F6FB"
+dataframeBorderColor = "#D8DCE5"
+baseRadius = "8px"
+buttonRadius = "8px"
+showWidgetBorder = true
+
+[theme.sidebar]
+backgroundColor = "#F4F6FB"
+secondaryBackgroundColor = "#EEF0F5"
+textColor = "#30333D"
+primaryColor = "#FF4B4B"
+borderColor = "#D8DCE5"
+
+[server]
+maxUploadSize = 100
+enableStaticServing = true
