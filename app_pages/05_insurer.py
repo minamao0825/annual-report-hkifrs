@@ -77,9 +77,9 @@ with st.container(key="report_screen_controls"):
     st.caption("Step 5 · Source Step 7 indicators, adapted to Hong Kong disclosures. Chart colors and layout follow the selected module.")
     with st.expander("Upload reviewed Excel data for Steps 5 and 6", icon=":material/upload_file:"):
         st.caption("Use a standardized .xlsx workbook with a Records sheet and, where available, a Check plan sheet. The platform recalculates units and reconciliation results before adding the data to both report pages.")
-        example_workbook = Path(__file__).resolve().parents[1] / "outputs" / "HKFRS17_Step5_6_current_data_upload.xlsx"
+        example_workbook = Path(__file__).resolve().parents[1] / "outputs" / "HKFRS17_Step5_6_company_comparatives_upload.xlsx"
         if example_workbook.is_file():
-            st.download_button("Download the current three-insurer 2024–2025 workbook", example_workbook.read_bytes(),
+            st.download_button("Download the three-insurer company-comparative workbook", example_workbook.read_bytes(),
                                file_name=example_workbook.name,
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                icon=":material/download:")

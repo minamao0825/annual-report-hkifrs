@@ -7,13 +7,16 @@ from hkifrs17.external import validate_external_workbook
 
 WORKBOOK = (
     Path(__file__).resolve().parents[1]
-    / "outputs/HK_IFRS17_FWD_YF_SunLife_2024_2025_latest.xlsx"
+    / "outputs/HKFRS17_Step5_6_company_comparatives_upload.xlsx"
 )
 
 
 def test_current_sunlife_workbook_uses_company_comparatives():
     records, profiles, checks = validate_external_workbook(WORKBOOK.read_bytes())
     assert len(records) == 861
+    assert records.loc[(records["Document ID"].eq("YF_2024"))
+                       & (records["Metric code"].eq("OCI_REINS_FINANCE")),
+                       "Original value"].iloc[0] == 180_381_305
     assert profiles == []
     assert "SUN_GROUP_2024" not in set(records["Document ID"])
     sun = records[records["Company"].eq("Sun Life Hong Kong")]
