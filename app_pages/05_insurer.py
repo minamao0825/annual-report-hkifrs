@@ -77,14 +77,13 @@ with st.container(key="report_screen_controls"):
     st.caption("Step 5 · Source Step 7 indicators, adapted to Hong Kong disclosures. Chart colors and layout follow the selected module.")
     with st.expander("Upload reviewed Excel data for Steps 5 and 6", icon=":material/upload_file:"):
         st.caption("Use a standardized .xlsx workbook with a Records sheet and, where available, a Check plan sheet. The platform recalculates units and reconciliation results before adding the data to both report pages.")
-        example_workbook = Path(__file__).resolve().parents[1] / "outputs" / "HK_IFRS17_FWD_YF_SunLife_2024_2025_investment_updated.xlsx"
+        example_workbook = Path(__file__).resolve().parents[1] / "outputs" / "HKFRS17_Step5_6_current_data_upload.xlsx"
         if example_workbook.is_file():
-            st.download_button("Download the latest three-insurer 2024–2025 workbook", example_workbook.read_bytes(),
+            st.download_button("Download the current three-insurer 2024–2025 workbook", example_workbook.read_bytes(),
                                file_name=example_workbook.name,
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                icon=":material/download:")
-            st.caption("Rows marked Not disclosed have no numeric value. Rows marked Derived from disclosed items show their summation in the source label and remain available for reconciled charts.")
-            st.caption("The Investment note sheet reconciles the note totals and components used by the Investment charts.")
+            st.caption("This saved workbook uses the earlier source-evidence layout. The six newer image-evidence fields remain blank on import; check the PDF page and source label before relying on a legacy cell.")
         external_file = st.file_uploader("Choose external workbook", type="xlsx", key="step5_external_workbook")
         if external_file is not None and st.button("Import verified data", type="primary", icon=":material/check:"):
             try:

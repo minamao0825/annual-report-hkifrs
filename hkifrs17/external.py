@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from io import BytesIO
 import json
 import os
@@ -12,7 +13,7 @@ import time
 import pandas as pd
 
 from .checks import RULE_BY_ID, evaluate_checks, normalize_plan
-from .data import COLUMNS, NUMERIC_VALUE_STATUSES, empty_records, normalize_records
+from .data import LEGACY_COLUMNS, NUMERIC_VALUE_STATUSES, empty_records, normalize_records
 from .storage import DATA, EXTERNAL_FILINGS_FILE, all_filings, integration_status, load_integrated
 
 
@@ -78,7 +79,10 @@ def validate_external_workbook(workbook_bytes: bytes) -> tuple[pd.DataFrame, lis
         if "Records" not in workbook.sheet_names:
             raise ValueError("The workbook needs a Records sheet.")
         raw = pd.read_excel(workbook, sheet_name="Records", dtype={"Document ID": str, "Period end": str})
-        missing = set(COLUMNS) - set(raw.columns)
+        # Older reviewed workbooks predate the six optional image-evidence
+        # columns. normalize_records keeps those fields blank rather than
+        # inventing source evidence that the workbook does not contain.
+        missing = set(LEGACY_COLUMNS) - set(raw.columns)
         if missing:
             raise ValueError("Records is missing columns: " + ", ".join(sorted(missing)))
         if raw.empty:
@@ -151,8 +155,20 @@ def load_analysis_records() -> pd.DataFrame:
         return external
     status = integration_status()
     integrated_file = DATA / "integrated_records.xlsx"
-    integrated_epoch = float(status.get("integrated_epoch") or
-                             (integrated_file.stat().st_mtime if integrated_file.exists() else 0.0))
+    integrated_epoch = status.get("integrated_epoch")
+    if integrated_epoch is None:
+        # Legacy integration metadata recorded the actual UTC build time but
+        # not an epoch. A copied or downloaded workbook has a newer filesystem
+        # mtime, which must not make an older integration replace a later import.
+        stamp = str(status.get("integrated_at_utc") or "").strip()
+        if stamp:
+            built_at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            if built_at.tzinfo is None:
+                built_at = built_at.replace(tzinfo=timezone.utc)
+            integrated_epoch = built_at.timestamp()
+        else:
+            integrated_epoch = integrated_file.stat().st_mtime if integrated_file.exists() else 0.0
+    integrated_epoch = float(integrated_epoch)
     old_epoch = EXTERNAL_RECORDS_FILE.stat().st_mtime if EXTERNAL_RECORDS_FILE.exists() else 0.0
     import_times = (json.loads(EXTERNAL_IMPORTS_FILE.read_text(encoding="utf-8"))
                     if EXTERNAL_IMPORTS_FILE.exists() else {})

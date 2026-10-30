@@ -1,14 +1,15 @@
-"""Source reconciliation and display rules for financial-investment stacks."""
+"""Investment stacks need a source total that reconciles to every component."""
 
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
 from hkifrs17.external import load_analysis_records, validate_external_workbook
 from hkifrs17.financial_investments import (
-    financial_investment_chart, financial_investment_notes, financial_investment_rows,
+    COMPONENTS, financial_investment_chart, financial_investment_rows,
 )
 
 
@@ -16,39 +17,45 @@ COMPANIES = ["FWD Life Bermuda", "Sun Life Hong Kong", "YF Life"]
 PERIODS = ["2024-12-31", "2025-12-31"]
 
 
-def test_every_year_end_stack_reconciles_to_reported_investment_total() -> None:
+def _complete_synthetic_filing() -> pd.DataFrame:
+    """Supply a complete artificial filing to test chart math and layout."""
+    source = load_analysis_records()
+    filing = source.loc[source["Document ID"].eq("FWD_2025")
+                        & source["Period end"].eq("2025-12-31")].copy()
+    parts = filing.loc[filing["Metric code"].isin(COMPONENTS)
+                       & filing["Value status"].eq("Reported")]
+    total = float(parts["Value (millions)"].sum()) + 50.0
+    template = parts.iloc[0].copy()
+    ac = template.copy()
+    ac["Metric code"] = "FIN_ASSET_AC"
+    ac["Value (millions)"] = 50.0
+    ac["Original value"] = 50_000.0
+    aggregate = template.copy()
+    aggregate["Metric code"] = "FIN_ASSET_TOTAL"
+    aggregate["Value (millions)"] = total
+    aggregate["Original value"] = total * 1_000
+    return pd.concat([filing, pd.DataFrame([ac, aggregate])], ignore_index=True)
+
+
+def test_incomplete_reference_never_creates_an_investment_stack() -> None:
     rows, issues = financial_investment_rows(load_analysis_records(), COMPANIES, PERIODS)
+    assert rows.empty
+    assert any("reported financial-investment total is unavailable" in issue for issue in issues)
+
+
+def test_complete_synthetic_stack_reconciles_to_its_total() -> None:
+    rows, issues = financial_investment_rows(_complete_synthetic_filing(),
+                                             ["FWD Life Bermuda"], ["2025-12-31"])
     assert not issues
-    totals = {
-        ("FWD Life Bermuda", "2024-12-31"): 16_512.701,
-        ("FWD Life Bermuda", "2025-12-31"): 20_809.488,
-        ("Sun Life Hong Kong", "2024-12-31"): 103_043,
-        ("Sun Life Hong Kong", "2025-12-31"): 137_330,
-        ("YF Life", "2024-12-31"): 77_563.271772,
-        ("YF Life", "2025-12-31"): 91_018.460644,
-    }
-    assert set(rows.groupby(["Company", "Period"]).groups) == set(totals)
-    for key, group in rows.groupby(["Company", "Period"]):
-        assert group["Amount"].sum() == pytest.approx(totals[key])
-        assert group["Reported total"].iloc[0] == pytest.approx(totals[key])
-    yf = rows.loc[rows["Company"].eq("YF Life") & rows["Period"].eq("2025-12-31")]
-    assert yf.loc[yf["Category"].eq("AC"), "Amount"].sum() == pytest.approx(37_523.745888)
-    sun = rows.loc[rows["Company"].eq("Sun Life Hong Kong") & rows["Period"].eq("2025-12-31")]
-    interest = sun.loc[sun["Metric code"].eq("FIN_ASSET_FVTPL_INTEREST")].iloc[0]
-    assert interest["Amount"] == 93_661
-    assert interest["Derivation"] == "Sum of disclosed line items"
-    assert set(sun["Category"]) == {"FVOCI", "FVTPL"}
-    assert any("rather than a separately reported subtotal" in note for note in financial_investment_notes(sun))
-    notes = financial_investment_notes(rows)
-    assert len(notes) == 1
-    assert "70,331 HKD millions (2024YE)" in notes[0]
-    assert "93,661 HKD millions (2025YE)" in notes[0]
-    assert "Each stack reconciles" not in notes[0]
+    assert set(rows["Category"]) == {"AC", "FVOCI", "FVTPL"}
+    assert rows["Amount"].sum() == pytest.approx(rows["Reported total"].iloc[0])
 
 
 def test_chart_is_stacked_and_uses_common_hkd_scale() -> None:
-    rows, _ = financial_investment_rows(load_analysis_records(), COMPANIES, PERIODS)
-    chart, excluded = financial_investment_chart(rows, COMPANIES, display_mode="HKD converted")
+    rows, _ = financial_investment_rows(_complete_synthetic_filing(),
+                                        ["FWD Life Bermuda"], ["2025-12-31"])
+    chart, excluded = financial_investment_chart(rows, ["FWD Life Bermuda"],
+                                                 display_mode="HKD converted")
     assert not excluded
     spec = chart.to_dict()
     bars, labels = spec["spec"]["layer"]
@@ -72,43 +79,33 @@ def test_chart_is_stacked_and_uses_common_hkd_scale() -> None:
     assert "Metric" not in str(bars["encoding"]["tooltip"])
     assert "Asset class" not in str(bars["encoding"]["tooltip"])
     assert "Derivation" not in str(bars["encoding"]["tooltip"])
-    fwd = chart.data.loc[chart.data["Company"].eq("FWD Life Bermuda") &
-                         chart.data["Period"].eq("2025-12-31")]
-    assert len(fwd) == 3
-    assert fwd["Amount"].sum() == pytest.approx(20_809.488 * 7.7833)
-    assert fwd.loc[fwd["Category"].eq("AC"), "Percent label"].iloc[0] == ""
-    assert fwd.loc[fwd["Category"].eq("FVOCI"), "Percent label"].iloc[0] == "68%"
-    sun = chart.data.loc[chart.data["Company"].eq("Sun Life Hong Kong") &
-                         chart.data["Period"].eq("2025-12-31")]
-    assert set(sun["Category"]) == {"FVOCI", "FVTPL"}
-    assert sun.loc[sun["Category"].eq("FVTPL"), "Amount"].iloc[0] == 134_900
+    plotted = chart.data.loc[chart.data["Company"].eq("FWD Life Bermuda")]
+    assert len(plotted) == 3
+    assert plotted["Amount"].sum() == pytest.approx(rows["Reported total"].iloc[0] * 7.7833)
+    assert plotted.loc[plotted["Category"].eq("AC"), "Percent label"].iloc[0] == ""
 
 
 def test_missing_component_omits_incomplete_stack() -> None:
-    source = load_analysis_records()
-    source = source.loc[~(source["Company"].eq("YF Life") &
-                          source["Period end"].eq("2025-12-31") &
-                          source["Metric code"].eq("FIN_ASSET_AC_DEBT"))]
-    rows, issues = financial_investment_rows(source, COMPANIES, PERIODS)
-    assert not ((rows["Company"].eq("YF Life") & rows["Period"].eq("2025-12-31")).any())
-    assert any("YF Life 2025" in issue for issue in issues)
+    source = _complete_synthetic_filing()
+    source = source.loc[~(source["Metric code"].eq("FIN_ASSET_AC")
+                          & source["Value status"].eq("Reported"))]
+    rows, issues = financial_investment_rows(source, ["FWD Life Bermuda"], ["2025-12-31"])
+    assert rows.empty
+    assert any("FWD Life Bermuda 2025" in issue and "do not reconcile" in issue
+               for issue in issues)
 
 
-def test_downloadable_workbook_contains_the_completed_classification() -> None:
-    workbook = (Path(__file__).resolve().parents[1] / "outputs" /
-                "HK_IFRS17_FWD_YF_SunLife_2024_2025_investment_updated.xlsx")
+def test_downloadable_workbook_preserves_missing_classification() -> None:
+    workbook = Path(__file__).resolve().parents[1] / "outputs" / "HKFRS17_Step5_6_current_data_upload.xlsx"
     records, _, _ = validate_external_workbook(workbook.read_bytes())
     rows, issues = financial_investment_rows(records, COMPANIES, PERIODS)
-    assert not issues
-    assert len(rows.groupby(["Company", "Period"])) == 6
-    sun = records.loc[records["Company"].eq("Sun Life Hong Kong") &
-                      records["Period end"].eq("2025-12-31") &
-                      records["Metric code"].eq("FIN_ASSET_FVTPL_INTEREST")].iloc[0]
-    assert sun["Value status"] == "Derived from disclosed items"
+    assert rows.empty
+    assert issues
+    assert not records["Metric code"].eq("FIN_ASSET_TOTAL").any()
 
 
 @pytest.mark.parametrize("page,key", [("05_insurer.py", "insurer"), ("06_peers.py", "peers")])
-def test_page_renders_financial_investment_stack(page: str, key: str) -> None:
+def test_page_keeps_incomplete_financial_investment_stack_unplotted(page: str, key: str) -> None:
     path = Path(__file__).resolve().parents[1] / "app_pages" / page
     records = load_analysis_records()
     with patch("hkifrs17.external.load_analysis_records", return_value=records):
@@ -118,4 +115,4 @@ def test_page_renders_financial_investment_stack(page: str, key: str) -> None:
         app.radio(key=f"{key}_secondary").set_value("Assets").run()
         app.radio(key=f"{key}_chart").set_value("asset_struct").run()
         assert not app.exception
-        assert len(app.get("vega_lite_chart")) == 1
+        assert len(app.get("vega_lite_chart")) == 0

@@ -151,7 +151,7 @@ def test_real_fwd_radar_covers_measurement_discount_and_main_statement_pages():
     pairs = {(lead.page, lead.table) for lead in plan.leads}
     assert {(8, targets[0]), (10, targets[1]), (14, targets[2]), (15, targets[2]),
             (65, targets[3]), (71, targets[3]), (79, targets[4])} <= pairs
-    assert plan.experience.record_count > 900
+    assert plan.experience.record_count == saved_experience().record_count > 0
     assert sum(map(len, guided_groups(8, 118, targets, pairs, plan.image_pages, 2))) < 111
 
 

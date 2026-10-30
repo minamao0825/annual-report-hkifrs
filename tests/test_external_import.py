@@ -1,6 +1,8 @@
 """The delivered workbook can be imported without weakening the review gate."""
 
 from pathlib import Path
+import json
+import os
 
 import hkifrs17.external as external
 from hkifrs17.demo import demo_records
@@ -42,3 +44,47 @@ def test_aligned_workbook_imports_reported_values_only():
     assert set(records["Review status"]) == {"Verified"}
     assert len(checks) == 102
     assert not checks["Result"].eq("Difference").any()
+
+
+def test_legacy_workbook_import_keeps_missing_image_evidence_blank():
+    source = Path(__file__).resolve().parents[1] / "outputs" / "HKFRS17_Step5_6_current_data_upload.xlsx"
+    records, _, checks = external.validate_external_workbook(source.read_bytes())
+    assert len(records) == 656
+    assert not checks["Result"].eq("Difference").any()
+    evidence = ["Source table heading", "Source row", "Column heading",
+                "Table year", "Unit evidence", "Evidence box"]
+    assert records[evidence].fillna("").eq("").all().all()
+
+
+def test_yf_2024_reinsurance_oci_matches_2025_report_comparative():
+    """Physical PDF page 28 shows HKD 180,381,305 in its 2024 column."""
+    records = external.load_external()
+    cell = records.loc[(records["Document ID"] == "YF_2024")
+                       & (records["Period end"] == "2024-12-31")
+                       & (records["Metric code"] == "OCI_REINS_FINANCE")].iloc[0]
+    assert cell["Original value"] == 180_381_305
+    assert cell["Value (millions)"] == 180.381305
+
+
+def test_legacy_integration_date_outweighs_copied_file_mtime(tmp_path, monkeypatch):
+    source = external.load_external()
+    imported = source.loc[source["Document ID"].eq("YF_2025")
+                          & source["Metric code"].eq("INS_REVENUE")].head(1).copy()
+    older = imported.copy()
+    imported.loc[:, "Source label"] = "newer reviewed import"
+    older.loc[:, "Source label"] = "older integrated snapshot"
+    integrated_file = tmp_path / "integrated_records.xlsx"
+    integrated_file.touch()
+    os.utime(integrated_file, (2_000_000_000, 2_000_000_000))
+    imports_file = tmp_path / "external_imports.json"
+    imports_file.write_text(json.dumps({"YF_2025": 1_700_000_000}), encoding="utf-8")
+    monkeypatch.setattr(external, "DATA", tmp_path)
+    monkeypatch.setattr(external, "EXTERNAL_RECORDS_FILE", tmp_path / "external_records.json")
+    monkeypatch.setattr(external, "EXTERNAL_IMPORTS_FILE", imports_file)
+    monkeypatch.setattr(external, "load_integrated", lambda: older)
+    monkeypatch.setattr(external, "load_external", lambda: imported)
+    monkeypatch.setattr(external, "integration_status",
+                        lambda: {"integrated_at_utc": "2022-01-01 00:00:00"})
+    result = external.load_analysis_records()
+    assert len(result) == 1
+    assert result.iloc[0]["Source label"] == "newer reviewed import"

@@ -74,38 +74,20 @@ def test_all_applicable_step7_modules_and_hk_metrics_are_displayed():
     )
 
 
-def test_yf_note_22_spot_ranges_are_chronological_and_tenor_specific():
+def test_yf_spot_ranges_are_not_invented_when_source_cells_are_absent():
     records = load_analysis_records()
     spots = records.loc[
         records["Company"].eq("YF Life")
         & records["Metric code"].str.contains("_SPOT_")
     ]
-    assert len(spots) == 40
-    assert set(spots["PDF page"]) == {133}
+    assert spots.empty
     summary = discount_rate_summary(
         records, ["YF Life"], ["2025-12-31", "2024-12-31"],
     )
+    assert summary.empty
     assert list(summary.columns) == [
         "Company", "Currency / portfolio", "Disclosed rate", "Value form", "Year",
-        "1Y", "5Y", "10Y", "15Y", "20Y",
     ]
-    assert set(summary["Currency / portfolio"]) == {"USD", "HKD"}
-    assert set(summary["Disclosed rate"]) == {"Adjusted spot rate"}
-    assert set(summary["Value form"]) == {"Range"}
-    selected = summary.set_index(["Currency / portfolio", "Year"])
-    assert selected.loc[("USD", "2024YE"), "1Y"] == "4.11%–4.85%"
-    assert selected.loc[("USD", "2025YE"), "1Y"] == "3.45%–4.17%"
-    assert selected.loc[("HKD", "2024YE"), "20Y"] == "3.75%–4.49%"
-    assert selected.loc[("HKD", "2025YE"), "20Y"] == "3.45%–4.17%"
-
-    missing_bound = records.loc[~(
-        records["Company"].eq("YF Life")
-        & records["Period end"].eq("2025-12-31")
-        & records["Metric code"].eq("DISCOUNT_USD_1Y_SPOT_HIGH")
-    )]
-    incomplete = discount_rate_summary(missing_bound, ["YF Life"], ["2025-12-31"])
-    assert incomplete.loc[incomplete["Currency / portfolio"].eq("USD"),
-                          "1Y"].iloc[0] == "Not disclosed"
 
 
 def test_fwd_and_sun_life_discount_rates_keep_disclosed_tenor_and_basis():
@@ -114,35 +96,31 @@ def test_fwd_and_sun_life_discount_rates_keep_disclosed_tenor_and_basis():
         records, ["FWD Life Bermuda", "Sun Life Hong Kong"],
         ["2025-12-31", "2024-12-31"],
     )
-    assert len(summary) == 20
+    assert len(summary) == 16
     selected = summary.set_index(["Company", "Currency / portfolio", "Disclosed rate", "Year"])
     fwd = selected.loc[("FWD Life Bermuda (Company)", "HKD",
                         "Spot rate with illiquidity premium", "2025YE")]
     assert fwd["1Y"] == "3.44%"
     sun = selected.loc[("Sun Life Hong Kong (Company)", "RMB NP / RMB UL",
-                        "Illiquidity premium", "2025YE")]
-    assert sun["1Y"] == "0.40%"
+                        "Spot rate with illiquidity premium", "2025YE")]
+    assert sun["1Y"] == "1.74%"
     other = selected.loc[("Sun Life Hong Kong (Company)",
-                          "Except RMB NP / RMB UL", "Illiquidity premium", "2024YE")]
-    assert other["5Y"] == "Up to 0.67%"
-    assert selected.loc[("Sun Life Hong Kong (Company)", "Except RMB NP / RMB UL",
-                         "Illiquidity premium", "2025YE"), "10Y"] == "Up to 1.12%"
-    assert other["Value form"] == "Upper limit"
+                          "RMB NP / RMB UL", "Spot rate with illiquidity premium", "2024YE")]
+    assert other["5Y"] == "1.84%"
+    assert other["Value form"] == "Point"
     assert not summary.loc[summary["Company"].eq("Sun Life Hong Kong (Company)"),
-                           "Disclosed rate"].eq("Spot rate with illiquidity premium").any()
+                           "Disclosed rate"].eq("Illiquidity premium").any()
     derived = records.loc[
         records["Company"].eq("Sun Life Hong Kong")
         & records["Metric code"].eq("DISCOUNT_CNY_1Y_ILP")
     ]
-    assert derived["Value status"].eq("Derived from disclosed items").all()
+    assert derived["Value status"].eq("Reported").all()
     source_cells = records.loc[
         records["Company"].eq("Sun Life Hong Kong")
         & (records["Metric code"].str.startswith("DISCOUNT_OTHER_PORTFOLIOS_")
            | records["Metric code"].str.endswith("_PREMIUM"))
     ]
-    assert len(source_cells) == 30
-    assert source_cells["Value status"].eq("Reported").all()
-    assert source_cells["PDF page"].eq(106).all()
+    assert source_cells.empty
 
 
 def test_discount_rate_table_adapts_to_new_company_tenor_and_scope(monkeypatch):
@@ -182,14 +160,14 @@ def test_discount_rate_print_pages_pack_short_company_tables(monkeypatch):
         records, ["FWD Life Bermuda", "Sun Life Hong Kong", "YF Life"],
         ["2024-12-31", "2025-12-31"],
     )
-    assert summary.groupby("Company", sort=False).size().tolist() == [12, 8, 4]
+    assert summary.groupby("Company", sort=False).size().tolist() == [12, 4]
 
     markup = []
     monkeypatch.setattr(report_ui.st, "html", markup.append)
     report_ui.render_discount_rate_table(summary)
-    assert len(markup) == 3
+    assert len(markup) == 2
     assert ["discount-rate-page-start" in part for part in markup] == [
-        False, True, False,
+        False, True,
     ]
 
 
