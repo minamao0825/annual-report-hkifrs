@@ -22,7 +22,9 @@ def test_source_step7_inventory_has_an_explicit_hk_disposition_and_source_table(
     assert {"summary_table", "csm_table", "discount_rate", "confidence_level", "nbv_table"} <= ids
     assert next(item for item in CHART_REQUIREMENTS if item.source_id == "csm_equity").decision == "Exclude"
     assert next(item for item in CHART_REQUIREMENTS if item.source_id == "exp_struct").decision == "Exclude"
-    assert "solvency" in next(item for item in CHART_REQUIREMENTS if item.source_id == "six_dimensional_charts").note
+    ratios = next(item for item in CHART_REQUIREMENTS if item.source_id == "six_dimensional_charts")
+    assert ratios.note == ""
+    assert "INV_YIELD" not in ratios.metrics
     for item in CHART_REQUIREMENTS:
         assert item.decision in {"Reuse", "Adapt", "Conditional", "Exclude"}
         if item.decision == "Exclude":
@@ -74,6 +76,7 @@ def test_requested_table_types_are_available_for_each_filing_scope():
     yf = next(item for item in PILOT_FILINGS if item["document_id"] == "YF_2025")
     sun = next(item for item in PILOT_FILINGS if item["document_id"] == "SUN_2025")
     assert yf["scope"] == "Consolidated" and yf["page_rotation_hints"][31] == 90
+    assert yf["page_rotation_hints"][113] == 90
     assert (30, "Financial position") in yf["note_page_hints"]
     assert sun["scope"] == "Company"
     assert (16, "Financial position") in sun["note_page_hints"]
@@ -108,10 +111,12 @@ def test_percentage_disclosures_do_not_get_monetary_conversion(monkeypatch):
             return {"choices": [{"message": {"content": json.dumps({"records": [
                 {"metric_code": "DISCOUNT_HKD_1Y_RF", "period_end": "2025-12-31",
                  "original_value": 2.63, "source_unit": "USD thousands",
-                 "source_label": "HKD 1 year · Risk free"},
+                 "source_label": "HKD 1 year · Risk free", "table_year": "2025",
+                 "column_heading": "2025 | HKD 1 year", "unit_evidence": "%"},
                 {"metric_code": "DISCOUNT_HKD_1Y_RF", "period_end": "2024-12-31",
                  "original_value": 3.88, "source_unit": "percent",
-                 "source_label": "HKD 1 year · Risk free comparative"},
+                 "source_label": "HKD 1 year · Risk free comparative", "table_year": "2024",
+                 "column_heading": "2024 | HKD 1 year", "unit_evidence": "%"},
             ]})}}]}
 
     def fake_post(url, **kwargs):
@@ -125,10 +130,12 @@ def test_percentage_disclosures_do_not_get_monetary_conversion(monkeypatch):
                                   table_names=["Discount rates · HKD"])
     assert rows.loc[0, "Source unit"] == "percent"
     assert rows.loc[0, "Currency"] == "%"
-    assert rows.loc[0, "Value (millions)"] == 2.63
+    assert rows.loc[0, "Value (millions)"] == 3.88
     assert len(rows) == 1
+    assert set(rows["Period end"]) == {"2024-12-31"}
+    assert "2025-12-31" in rows.loc[0, "Reviewer note"]
     assert "source_unit must be \"percent\"" in captured["json"]["messages"][1]["content"][0]["text"]
-    assert "Extract ONLY the 2025 reporting year" in captured["json"]["messages"][1]["content"][0]["text"]
+    assert "Extract the printed 2025 and 2024 values" in captured["json"]["messages"][1]["content"][0]["text"]
 
 
 def test_analytical_ratios_leave_missing_inputs_visible():

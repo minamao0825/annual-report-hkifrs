@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 import pandas as pd
 
 from .data import COLUMNS
+
+PAGE_DISCOVERY_VERSION = 10
+EXTRACTION_PLAN_VERSION = 1
 
 
 TABLE_METRICS = {
@@ -35,6 +39,7 @@ TABLE_METRICS = {
     "Reinsurance balances note": ("REINS_ASSETS_NOTE_OPEN", "REINS_ASSETS_NOTE_MOVEMENT", "REINS_ASSETS_NOTE_CLOSE"),
     "Insurance contract balances": (
         "INS_LIABS_NOTE_OPEN", "INS_LIABS_NOTE_CLOSE", "INS_LIABS_NONPAA_CLOSE", "INS_LIABS_PAA_CLOSE",
+        "INS_ACQ_ASSET_CLOSE",
     ),
     "Insurance net movement": (
         "INS_NOTE_NET_OPEN", "INS_NOTE_PL_OCI", "INS_NOTE_CASHFLOWS", "INS_NOTE_NET_CLOSE",
@@ -54,19 +59,30 @@ TABLE_METRICS = {
     "Comprehensive income": (
         "OCI_TOTAL", "COMPREHENSIVE_INCOME", "OCI_FVOCI_DEBT", "OCI_FVOCI_RECYCLE",
         "OCI_INS_FINANCE", "OCI_REINS_FINANCE", "OCI_HEDGE", "OCI_TAX",
+        "OCI_FAIR_VALUE_RESERVE", "OCI_FX_TRANSLATION", "OCI_ECL_ADJUSTMENT",
     ),
     "Other comprehensive income analysis": (
         "OCI_TOTAL", "OCI_FVOCI_DEBT", "OCI_FVOCI_RECYCLE", "OCI_INS_FINANCE",
-        "OCI_REINS_FINANCE", "OCI_HEDGE", "OCI_TAX",
+        "OCI_REINS_FINANCE", "OCI_HEDGE", "OCI_TAX", "OCI_FAIR_VALUE_RESERVE",
+        "OCI_FX_TRANSLATION", "OCI_ECL_ADJUSTMENT",
     ),
     "Equity movement": ("EQUITY_OPEN", "EQUITY", "EQUITY_DIVIDENDS", "EQUITY_NEW_CAPITAL", "EQUITY_OTHER"),
     "Investment result analysis": (
         "INV_RETURN_TOTAL", "NET_INV_RESULT_TOTAL", "INS_FINANCE_TOTAL", "REINS_FINANCE_TOTAL",
-        "INV_YIELD",
+        "INV_YIELD", "INV_INTEREST_EIR",
+        "INV_OTHER_REV_UNDERLYING_DESIGNATED", "INV_OTHER_REV_UNDERLYING_MANDATORY",
+        "INV_OTHER_REV_UNDERLYING_INCOME", "INV_OTHER_REV_NONUNDERLYING_AC_FVOCI",
+        "INV_OTHER_REV_NONUNDERLYING_FVPL", "INV_OTHER_REV_NONUNDERLYING_INCOME",
+        "INV_OTHER_REV_TOTAL", "INV_IMPAIRMENT_AC", "INV_IMPAIRMENT_FVOCI",
+        "INV_IMPAIRMENT_TOTAL",
     ),
     "Financial investment classification": (
-        "FIN_ASSET_AC", "FIN_ASSET_FVOCI_DEBT", "FIN_ASSET_FVOCI_EQUITY",
-        "FIN_ASSET_FVTPL_DEBT", "FIN_ASSET_FVTPL_EQUITY", "FIN_ASSET_FVTPL_FUNDS",
+        "FIN_ASSET_TOTAL", "FIN_ASSET_AC", "FIN_ASSET_AC_DEBT", "FIN_ASSET_AC_LOANS",
+        "FIN_ASSET_FVOCI_DEBT", "FIN_ASSET_FVOCI_EQUITY", "FIN_ASSET_FVTPL_DEBT",
+        "FIN_ASSET_FVTPL_EQUITY", "FIN_ASSET_FVTPL_FUNDS", "FIN_ASSET_FVTPL_INTEREST",
+        "FIN_ASSET_FVTPL_TRUST_EQUITY", "FIN_ASSET_FVTPL_PARTNERSHIPS",
+        "FIN_ASSET_FVTPL_MORTGAGES", "FIN_ASSET_FVTPL_LOANS",
+        "FIN_ASSET_FVTPL_UNLISTED_EQ_OTHER", "FIN_ASSET_FVTPL_DERIVATIVES",
     ),
     "Insurance service expense analysis": (
         "INS_EXP_CLAIMS", "INS_EXP_ACQ_AMORT", "INS_EXP_ONEROUS", "INS_EXP_LIC",
@@ -86,14 +102,18 @@ TABLE_METRICS = {
     ),
     "Insurance non-PAA remaining/incurred movement": (
         "INS_NONPAA_NET_OPEN", "INS_NONPAA_PL_OCI", "INS_NONPAA_CASH", "INS_NONPAA_NET_CLOSE",
+        "INS_GROSS_OPEN", "INS_GROSS_PL_OCI", "INS_GROSS_CASH", "INS_GROSS_CLOSE",
         "INS_NONPAA_LRC_CLOSE", "INS_NONPAA_LC_CLOSE", "INS_NONPAA_LIC_CLOSE",
         "INS_LIABS_NONPAA_CLOSE", "INS_EXP_NONPAA", "INS_EXP_CLAIMS", "INS_EXP_ACQ_AMORT",
         "INS_EXP_ONEROUS", "INS_EXP_LIC",
     ),
     "Insurance non-PAA measurement reconciliation": (
         "INS_NONPAA_PVFCF_OPEN", "INS_NONPAA_RA_OPEN", "CSM_OPEN",
+        "INS_CSM_FV_OPEN", "INS_CSM_OTHER_OPEN",
         "INS_NONPAA_PVFCF_CLOSE", "INS_NONPAA_RA_CLOSE", "INS_NONPAA_CSM_CLOSE",
-        "INS_CSM_FV_CLOSE", "INS_CSM_OTHER_CLOSE", "INS_CSM_FV_RELEASE", "INS_CSM_OTHER_RELEASE",
+        "INS_CSM_FV_CLOSE", "INS_CSM_MOD_CLOSE", "INS_CSM_OTHER_CLOSE",
+        "INS_CSM_FV_PL_OCI", "INS_CSM_OTHER_PL_OCI",
+        "INS_CSM_FV_RELEASE", "INS_CSM_OTHER_RELEASE",
         "CSM_NEW", "CSM_RELEASE", "CSM_CLOSE", "CSM_ESTIMATE_CHANGE", "CSM_FINANCE_CHANGE",
     ),
     "Insurance PAA remaining/incurred movement": (
@@ -107,6 +127,7 @@ TABLE_METRICS = {
         "REINS_ASSETS_NONPAA_CLOSE",
     ),
     "Reinsurance non-PAA measurement reconciliation": (
+        "REINS_CSM_FV_OPEN", "REINS_CSM_OTHER_OPEN",
         "REINS_NONPAA_PVFCF_CLOSE", "REINS_NONPAA_RA_CLOSE", "REINS_NONPAA_CSM_CLOSE",
         "REINS_CSM_FV_CLOSE", "REINS_CSM_MOD_CLOSE", "REINS_CSM_OTHER_CLOSE", "REINS_CSM_RELEASE",
     ),
@@ -132,7 +153,71 @@ for _currency in ("CNY", "HKD", "USD"):
     TABLE_METRICS[f"Discount rates · {_currency}"] = tuple(
         f"DISCOUNT_{_currency}_{tenor}_{basis}"
         for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y") for basis in ("RF", "ILP")
+    ) + tuple(
+        f"DISCOUNT_{_currency}_{tenor}_SPOT_{bound}"
+        for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y")
+        for bound in ("LOW", "HIGH")
     )
+TABLE_METRICS["Discount rates · Sun Life disclosed portfolio groups"] = tuple(
+    f"DISCOUNT_CNY_{tenor}_PREMIUM"
+    for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y")
+) + tuple(
+    f"DISCOUNT_OTHER_PORTFOLIOS_{tenor}_{basis}"
+    for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y")
+    for basis in ("RF", "PREMIUM_UP_TO")
+)
+
+# Page discovery targets are physical report tables, not individual currencies,
+# contract columns or reconciliation line items. Keep the older names above for
+# saved pilot hints and existing reviewed extraction plans.
+DISCOVERY_TARGETS = {
+    "Profit or loss": ("Profit or loss",),
+    "Comprehensive income": ("Comprehensive income",),
+    "Financial position": ("Financial position",),
+    "Equity movement": ("Equity movement",),
+    "Cash flows": ("Cash flows",),
+    "Investment result analysis": ("Investment result analysis",),
+    "Financial investment classification": ("Financial investment classification",),
+    "Insurance and reinsurance contracts": (
+        "Insurance revenue note", "Insurance service expense analysis",
+        "Contract asset and liability summary", "Insurance balances note",
+        "Reinsurance balances note", "Insurance contract balances",
+        "Reinsurance contract balances", "CSM / contract note",
+        "Insurance net movement", "Insurance measurement components",
+        "Insurance non-PAA remaining/incurred movement",
+        "Insurance non-PAA measurement reconciliation",
+        "Insurance PAA remaining/incurred movement",
+        "Reinsurance net movement", "Reinsurance measurement components",
+        "Reinsurance non-PAA remaining/incurred movement",
+        "Reinsurance non-PAA measurement reconciliation",
+        "Reinsurance PAA remaining/incurred movement",
+        "Initially recognised insurance contracts",
+        "Initially recognised reinsurance contracts", "Expected CSM recognition",
+        "Risk adjustment confidence level",
+    ),
+    "Discount rates and illiquidity premiums": (
+        "Discount rates · CNY", "Discount rates · HKD", "Discount rates · USD",
+        "Discount rates · Sun Life disclosed portfolio groups",
+    ),
+}
+for _target, _members in DISCOVERY_TARGETS.items():
+    TABLE_METRICS[_target] = tuple(dict.fromkeys(
+        code for member in _members for code in TABLE_METRICS[member]
+    ))
+
+
+def discovery_target_for(table: str) -> str:
+    """Map older detailed page selections to their report-level table."""
+    if table in {
+        "Insurance service expenses", "Insurance and reinsurance contract balances",
+        "Insurance contract movement and measurement",
+        "Reinsurance contract movement and measurement",
+    }:
+        return "Insurance and reinsurance contracts"
+    for target, members in DISCOVERY_TARGETS.items():
+        if table == target or table in members:
+            return target
+    return table
 
 TABLE_FAMILIES = {
     "Primary statements": ("Profit or loss", "Comprehensive income", "Financial position", "Equity movement", "Cash flows"),
@@ -144,15 +229,19 @@ TABLE_FAMILIES = {
     "Insurance contract movements": (
         "Contract asset and liability summary", "Insurance non-PAA remaining/incurred movement",
         "Insurance non-PAA measurement reconciliation", "Insurance PAA remaining/incurred movement",
+        "Insurance contract balances", "Insurance net movement", "Insurance measurement components",
+        "CSM / contract note",
     ),
     "Reinsurance contract movements": (
         "Reinsurance non-PAA remaining/incurred movement", "Reinsurance non-PAA measurement reconciliation",
         "Reinsurance PAA remaining/incurred movement",
+        "Reinsurance contract balances", "Reinsurance net movement", "Reinsurance measurement components",
     ),
     "New business and assumptions": (
         "Initially recognised insurance contracts", "Initially recognised reinsurance contracts",
         "Expected CSM recognition", "Discount rates · CNY", "Discount rates · HKD",
-        "Discount rates · USD", "Risk adjustment confidence level",
+        "Discount rates · USD", "Discount rates · Sun Life disclosed portfolio groups",
+        "Risk adjustment confidence level",
     ),
 }
 PLAN_COLUMNS = ["Extract", "Physical PDF page", "Table"]
@@ -217,10 +306,12 @@ def metric_codes_for(tables: list[str]) -> set[str]:
 
 
 def merge_extracted(current: pd.DataFrame, incoming: pd.DataFrame,
-                    earlier_batch_keys: set[tuple] | None = None) -> tuple[pd.DataFrame, dict[str, int]]:
-    """Replace Pending cells, while preserving reviewed cells and earlier batch pages."""
+                    earlier_batch_keys: set[tuple] | None = None,
+                    source_task: tuple[int, str] | None = None) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Replace one table-page's Pending set, preserving reviewed and failed pages."""
     if incoming.empty:
-        return current.copy(), {"added": 0, "replaced_pending": 0, "preserved": 0}
+        return current.copy(), {"added": 0, "replaced_pending": 0,
+                                "removed_pending": 0, "preserved": 0}
     if not set(COLUMNS).issubset(incoming.columns):
         raise ValueError("Extracted records are missing required columns.")
     incoming = incoming.drop_duplicates(RECORD_KEYS, keep="first").copy()
@@ -228,6 +319,17 @@ def merge_extracted(current: pd.DataFrame, incoming: pd.DataFrame,
     locked = current[current["Review status"].ne("Pending")]
     protected = set(map(tuple, locked[RECORD_KEYS].itertuples(index=False, name=None)))
     protected.update(earlier_batch_keys or set())
+    stale_pending_keys: set[tuple] = set()
+    if source_task is not None:
+        page, table = source_task
+        task_mask = (current["Review status"].eq("Pending")
+                     & current["PDF page"].eq(page)
+                     & current["Metric code"].isin(TABLE_METRICS[table]))
+        task_keys = list(map(tuple, current[RECORD_KEYS].itertuples(index=False, name=None)))
+        stale_mask = task_mask & pd.Series(
+            [key not in protected for key in task_keys], index=current.index)
+        stale_pending_keys = {key for key, remove in zip(task_keys, stale_mask) if remove}
+        current = current.loc[~stale_mask].copy()
     source_keys = list(map(tuple, incoming[RECORD_KEYS].itertuples(index=False, name=None)))
     permitted = incoming[[key not in protected for key in source_keys]].copy()
     permitted_keys = set(map(tuple, permitted[RECORD_KEYS].itertuples(index=False, name=None)))
@@ -236,6 +338,7 @@ def merge_extracted(current: pd.DataFrame, incoming: pd.DataFrame,
     return merged, {
         "added": len(permitted_keys - old_keys),
         "replaced_pending": len(permitted_keys & old_keys),
+        "removed_pending": len(stale_pending_keys - permitted_keys),
         "preserved": len(source_keys) - len(permitted_keys),
     }
 
@@ -246,38 +349,49 @@ def extract_confirmed_batch(
     load_current: Callable[[], pd.DataFrame],
     save_current: Callable[[pd.DataFrame], None],
     progress: Callable[[int, int, int, str], None] | None = None,
+    max_workers: int = 1,
 ) -> pd.DataFrame:
-    """Extract each confirmed table-page pair; one failure never stops the batch."""
+    """Extract independently; merge and save in the original reviewed order."""
+    if not 1 <= max_workers <= 4:
+        raise ValueError("Choose 1 to 4 parallel extraction requests.")
     unique_tasks = list(dict.fromkeys(tasks))
     rows: list[dict] = []
     earlier_keys: set[tuple] = set()
-    for index, (physical_page, table) in enumerate(unique_tasks, start=1):
-        outcome = {
-            "Physical PDF page": physical_page, "Table": table,
-            "Status": "Failed", "Detail": "",
-            "Added": 0, "Refreshed Pending": 0, "Preserved": 0,
-        }
-        try:
-            incoming = extractor(physical_page, table)
-            if incoming.empty:
-                outcome["Detail"] = "No mapped cells found"
-            else:
-                merged, counts = merge_extracted(load_current(), incoming, earlier_keys)
-                if counts["added"] or counts["replaced_pending"]:
-                    save_current(merged)
-                earlier_keys.update(map(tuple, incoming[RECORD_KEYS].itertuples(index=False, name=None)))
-                outcome.update({
-                    "Status": "Saved as Pending", "Detail": "",
-                    "Added": counts["added"],
-                    "Refreshed Pending": counts["replaced_pending"],
-                    "Preserved": counts["preserved"],
-                })
-        except Exception as exc:
-            outcome["Detail"] = str(exc)
-        rows.append(outcome)
-        if progress is not None:
-            progress(index, len(unique_tasks), physical_page, table)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(extractor, page, table) for page, table in unique_tasks]
+        for index, ((physical_page, table), future) in enumerate(zip(unique_tasks, futures), start=1):
+            outcome = {
+                "Physical PDF page": physical_page, "Table": table,
+                "Status": "Failed", "Detail": "",
+                "Added": 0, "Refreshed Pending": 0,
+                "Removed stale Pending": 0, "Preserved": 0,
+            }
+            try:
+                incoming = future.result()
+                if incoming.empty:
+                    outcome["Detail"] = ("No unambiguous mapped cells found; inspect this PDF page "
+                                         "and retry this table alone.")
+                else:
+                    merged, counts = merge_extracted(load_current(), incoming, earlier_keys,
+                                                      source_task=(physical_page, table))
+                    if counts["added"] or counts["replaced_pending"] or counts["removed_pending"]:
+                        save_current(merged)
+                    earlier_keys.update(map(tuple, incoming[RECORD_KEYS].itertuples(index=False, name=None)))
+                    outcome.update({
+                        "Status": "Saved as Pending", "Detail": "",
+                        "Added": counts["added"],
+                        "Refreshed Pending": counts["replaced_pending"],
+                        "Removed stale Pending": counts["removed_pending"],
+                        "Preserved": counts["preserved"],
+                    })
+            except Exception as exc:
+                outcome["Detail"] = str(exc)
+            rows.append(outcome)
+            if progress is not None:
+                progress(index, len(unique_tasks), physical_page, table)
     return pd.DataFrame(rows, columns=[
         "Physical PDF page", "Table", "Status", "Detail",
-        "Added", "Refreshed Pending", "Preserved",
+        "Added", "Refreshed Pending", "Removed stale Pending", "Preserved",
     ])
+
+

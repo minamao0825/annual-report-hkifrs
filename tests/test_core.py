@@ -174,20 +174,34 @@ def test_review_and_publish_gate(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "PUBLISHED_FILE", tmp_path / "published_records.xlsx")
     draft = demo_records("YF_2025")
     storage.save_draft("YF_2025", draft)
-    with pytest.raises(ValueError, match="Verify at least one"):
+    with pytest.raises(ValueError, match="Pending"):
         storage.approve_draft("YF_2025")
     draft["Review status"] = "Verified"
     workbook = review_workbook_bytes(draft, list(PILOT_FILINGS))
     reviewed = read_review_workbook(workbook, list(PILOT_FILINGS))
     storage.save_draft("YF_2025", reviewed)
+    assert storage.approve_draft("YF_2025") == 26
+    # Automatic checks still block genuine partially missing note inputs.
     with pytest.raises(ValueError, match="Missing inputs"):
-        storage.approve_draft("YF_2025")
+        storage.publish_selected(["YF_2025"])
     plan = storage.load_check_plan("YF_2025")
     optional = ~plan["Check ID"].isin(["PRIMARY", "SERVICE", "BALANCE"])
     plan.loc[optional, "Assessment"] = "Not applicable"
     plan.loc[optional, "Reason"] = "No matching disclosed note fields in the reviewed pilot sample."
+    method_split = plan["Check ID"].isin(["INS_LIABS_METHOD", "REINS_ASSETS_METHOD"])
+    plan.loc[method_split, "Note reference"] = "Note 22, physical PDF p.120"
     storage.save_check_plan("YF_2025", plan)
     assert storage.approve_draft("YF_2025") == 26
+    from hkifrs17.source_audit import _fingerprint, pdf_stamp
+    approved = storage.load_approved("YF_2025")
+    stamp = pdf_stamp(storage.pdf_path(storage.filing_by_id("YF_2025")))
+    storage.save_source_audit("YF_2025", [
+        {"Document ID": row["Document ID"], "Period end": row["Period end"],
+         "Metric code": row["Metric code"], "PDF page": int(row["PDF page"]),
+         "Source check": "Match", "Fingerprint": _fingerprint(row, stamp),
+         "Reason": "Independent image reading matched."}
+        for _, row in approved.iterrows()
+    ])
     assert storage.publish_selected(["YF_2025"]) == 26
     assert len(storage.load_published()) == 26
     assert storage.integrate_published() == 26
@@ -195,8 +209,9 @@ def test_review_and_publish_gate(tmp_path, monkeypatch):
     assert len(storage.load_integrated()) == 26
     reviewed.loc[reviewed["Metric code"].eq("OPERATING_CF"), "Review status"] = "Excluded"
     storage.save_draft("YF_2025", reviewed)
+    assert storage.approve_draft("YF_2025") == 24
     with pytest.raises(ValueError, match="Missing inputs"):
-        storage.approve_draft("YF_2025")
+        storage.publish_selected(["YF_2025"])
     assert len(storage.load_published()) == 26
     assert storage.integration_status()["current"]
 
@@ -213,7 +228,7 @@ def test_review_workbook_has_audit_and_review_status_dropdowns():
     assert validations["Q2:Q1048576"].showDropDown is False
     assert validations["R2:R1048576"].formula1 == '"Pending,Verified,Excluded"'
     assert validations["R2:R1048576"].showErrorMessage is True
-    assert workbook.sheetnames == ["Records", "Checks", "Check plan", "Read me"]
+    assert workbook.sheetnames == ["Records", "Checks", "Excel arithmetic", "Unit factors", "Check plan", "Rule catalogue", "Read me"]
 
 
 def test_legacy_review_workbook_import_requires_fresh_check_assessment():
@@ -278,6 +293,7 @@ def test_kimi_extraction_uses_fast_mode_and_configurable_timeout(monkeypatch):
         return Response()
 
     monkeypatch.setattr(pdf, "page_png", lambda *args, **kwargs: b"test image")
+    monkeypatch.setattr(pdf, "page_text", lambda *args, **kwargs: "readable")
     monkeypatch.setattr(pdf.requests, "post", fake_post)
     pdf.extract_model_page(Path("unused.pdf"), PILOT_FILINGS[0], 27, list(PILOT_FILINGS),
                            base_url="https://api.moonshot.cn/v1", model="kimi-k2.6", api_key="test-key",
@@ -300,6 +316,7 @@ def test_kimi_timeout_does_not_retry_or_change_draft(monkeypatch):
         raise requests.exceptions.ReadTimeout("read timed out")
 
     monkeypatch.setattr(pdf, "page_png", lambda *args, **kwargs: b"test image")
+    monkeypatch.setattr(pdf, "page_text", lambda *args, **kwargs: "readable")
     monkeypatch.setattr(pdf.requests, "post", slow_post)
     with pytest.raises(TimeoutError, match="existing draft was not changed"):
         pdf.extract_model_page(Path("unused.pdf"), PILOT_FILINGS[0], 27, list(PILOT_FILINGS),
@@ -335,7 +352,8 @@ def test_batch_merge_preserves_reviewed_cells_and_refreshes_pending():
     incoming["Original value"] = [111, 222]
     incoming["Review status"] = "Pending"
     merged, counts = merge_extracted(current, incoming)
-    assert counts == {"added": 0, "replaced_pending": 1, "preserved": 1}
+    assert counts == {"added": 0, "replaced_pending": 1,
+                      "removed_pending": 0, "preserved": 1}
     assert merged.loc[merged["Metric code"].eq(current.iloc[0]["Metric code"])
                       & merged["Period end"].eq(current.iloc[0]["Period end"]), "Original value"].iloc[0] == current.iloc[0]["Original value"]
 
@@ -369,6 +387,26 @@ def test_confirmed_batch_continues_after_table_failure_and_reports_progress():
     assert [item[0] for item in progress] == [1, 2, 3]
 
 
+def test_parallel_batch_keeps_reviewed_save_order_and_cells():
+    from threading import Barrier
+    from hkifrs17.extraction_plan import extract_confirmed_batch
+
+    barrier = Barrier(2)
+    source = demo_records("YF_2025")
+    draft = [source.iloc[:0].copy()]
+    def extractor(page, table):
+        barrier.wait(timeout=5)  # Both independent model tasks must be running.
+        return source.iloc[[0 if page == 27 else 2]].copy()
+    result = extract_confirmed_batch(
+        [(27, "Profit or loss"), (32, "Cash flows")], extractor=extractor,
+        load_current=lambda: draft[0],
+        save_current=lambda frame: draft.__setitem__(0, frame),
+        max_workers=2,
+    )
+    assert result["Status"].tolist() == ["Saved as Pending", "Saved as Pending"]
+    assert len(draft[0]) == 2
+
+
 def test_model_batch_scope_only_returns_selected_table_metrics(monkeypatch):
     import hkifrs17.pdf as pdf
 
@@ -381,9 +419,11 @@ def test_model_batch_scope_only_returns_selected_table_metrics(monkeypatch):
         def json(self):
             return {"choices": [{"message": {"content": __import__("json").dumps({"records": [
                 {"metric_code": "OPERATING_CF", "period_end": "2025-12-31", "original_value": 10,
-                 "source_unit": "HKD", "source_label": "Operating cash flow"},
+                 "source_unit": "HKD", "source_label": "Operating cash flow",
+                 "table_year": "2025", "column_heading": "2025", "unit_evidence": "$"},
                 {"metric_code": "INS_REVENUE", "period_end": "2025-12-31", "original_value": 99,
-                 "source_unit": "HKD", "source_label": "Insurance revenue"},
+                 "source_unit": "HKD", "source_label": "Insurance revenue",
+                 "table_year": "2025", "column_heading": "2025", "unit_evidence": "$"},
             ]})}}]}
 
     def fake_post(url, **kwargs):
@@ -391,6 +431,7 @@ def test_model_batch_scope_only_returns_selected_table_metrics(monkeypatch):
         return Response()
 
     monkeypatch.setattr(pdf, "page_png", lambda *args, **kwargs: b"page")
+    monkeypatch.setattr(pdf, "page_text", lambda *args, **kwargs: "readable")
     monkeypatch.setattr(pdf.requests, "post", fake_post)
     rows = pdf.extract_model_page(Path("unused.pdf"), PILOT_FILINGS[0], 32, list(PILOT_FILINGS),
                                   base_url="https://api.moonshot.cn/v1", model="kimi-k2.6", api_key="test-key",

@@ -23,6 +23,7 @@ def test_three_filing_workbook_recomputes_checks_and_is_idempotent(tmp_path, mon
     assert indexed.loc[("YF_2025", "INS_NET_ROLL"), "Result"] == "Pass"
     assert indexed.loc[("YF_2025", "REINS_NET_ROLL"), "Result"] == "Pass"
     monkeypatch.setattr(external, "EXTERNAL_RECORDS_FILE", tmp_path / "external_records.json")
+    monkeypatch.setattr(external, "EXTERNAL_IMPORTS_FILE", tmp_path / "external_imports.json")
     first_count, _ = external.save_external_workbook(source)
     second_count, _ = external.save_external_workbook(source)
     assert first_count == second_count == 314

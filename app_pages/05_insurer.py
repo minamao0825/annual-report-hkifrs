@@ -9,43 +9,82 @@ import pandas as pd
 import streamlit as st
 
 from hkifrs17.charts import (
-    company_year_comparison_bars, csm_maturity_lines, financial_performance_trends, period_bars,
-    ratio_module_period_bars, revenue_stack_bars, tax_profit_bars,
+    company_year_comparison_bars, csm_maturity_lines, csm_ratio_trend_chart,
+    investment_note_period_bars, period_bars,
+    ratio_module_period_bars, revenue_stack_bars, service_result_period_bars, tax_profit_bars,
 )
+from hkifrs17.appendix_tables import (
+    insurance_service_appendix_tables, new_business_appendix_tables,
+)
+from hkifrs17.csm_waterfall import (
+    csm_pre_release_combined_chart, csm_pre_release_rows, csm_rollforward_table,
+    csm_waterfall_chart, csm_waterfall_notes, csm_waterfall_rows,
+)
+from hkifrs17.csm_transition import csm_transition_chart, csm_transition_rows
 from hkifrs17.demo import demo_records
+from hkifrs17.equity_waterfall import (
+    equity_movement_table, equity_waterfall_chart, equity_waterfall_notes,
+    equity_waterfall_rows,
+)
 from hkifrs17.external import load_analysis_records, save_external_workbook
+from hkifrs17.financial_investments import (
+    financial_investment_chart, financial_investment_notes, financial_investment_rows,
+)
 from hkifrs17.highlights import financial_highlights_table
+from hkifrs17.investment_note import (
+    NET_FINANCE_FORMULA, NET_INVESTMENT_FORMULA,
+    investment_note_captions, investment_note_rows, net_investment_explanations,
+)
+from hkifrs17.new_business_ratios import (
+    IFRS_MARGIN_EXPLANATION, RATIO_EXPLANATION, RATIO_TITLES,
+    new_business_ifrs_margin_chart, new_business_ifrs_margin_rows,
+    new_business_ratio_chart, new_business_ratio_rows,
+)
+from hkifrs17.oci_analysis import (
+    oci_comparison_chart, oci_comparison_notes, oci_comparison_rows,
+    oci_comparison_table,
+)
+from hkifrs17.oci_waterfall import (
+    oci_waterfall_chart, oci_waterfall_notes, oci_waterfall_rows,
+)
 from hkifrs17.pdf import page_png
 from hkifrs17.report import html_report
 from hkifrs17.report_modules import (
     COMPANY_YEAR_COMPARISON_IDS, HOVER_ONLY_LABEL_MODULE_IDS,
     LATEST_YEAR_CHART_IDS,
-    MOVEMENT_MODULE_IDS, PERFORMANCE_RATIO_PAGE_GROUPS, RATIO_MODULE_LABELS, REPORT_MODULES,
+    MOVEMENT_MODULE_IDS, RATIO_MODULE_LABELS, REPORT_MODULES,
     NET_RESULT_REPORTED_LABELS,
     STACKED_AMOUNT_MODULE_IDS, STACKED_AMOUNT_TOTAL_CODES,
     YEAR_COLORED_MODULE_IDS, discount_rate_summary,
-    investment_result_reconciliation, stacked_component_metrics,
-    missing_metrics, module_rows, movement_chart_rows, report_modules_for_rows,
+    confidence_level_summary,
+    financial_performance_ratio_table,
+    stacked_component_metrics,
+    missing_metrics, module_company_disclosure_notes, module_rows, movement_chart_rows, report_modules_for_rows,
 )
 from hkifrs17.report_ui import (
     ALL_IN_SELECTION, back_cover, cover, print_controls, render_financial_highlights_table,
-    render_discount_rate_table, render_report_table, sidebar_report_navigation, slug,
+    render_csm_rollforward_table, render_discount_rate_table, render_confidence_level_table,
+    render_financial_performance_table,
+    render_equity_movement_table, render_report_table, render_appendix_year_tables,
+    sidebar_report_navigation, slug,
 )
+from hkifrs17.service_result import service_result_component_rows, service_result_notes
 from hkifrs17.storage import filing_by_id, pdf_path
 
 
 with st.container(key="report_screen_controls"):
     st.title("Insurer explorer")
-    st.caption("Step 5 · Source Step 7 indicators, adapted to Hong Kong disclosures. Period is the horizontal axis; colors identify indicators.")
+    st.caption("Step 5 · Source Step 7 indicators, adapted to Hong Kong disclosures. Chart colors and layout follow the selected module.")
     with st.expander("Upload reviewed Excel data for Steps 5 and 6", icon=":material/upload_file:"):
         st.caption("Use a standardized .xlsx workbook with a Records sheet and, where available, a Check plan sheet. The platform recalculates units and reconciliation results before adding the data to both report pages.")
-        example_workbook = Path(__file__).resolve().parents[1] / "outputs" / "HK_IFRS17_FWD_YF_SunLife_2024_2025_latest.xlsx"
+        example_workbook = Path(__file__).resolve().parents[1] / "outputs" / "HK_IFRS17_FWD_YF_SunLife_2024_2025_investment_updated.xlsx"
         if example_workbook.is_file():
             st.download_button("Download the latest three-insurer 2024–2025 workbook", example_workbook.read_bytes(),
                                file_name=example_workbook.name,
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                icon=":material/download:")
-            st.caption("Each insurer and year has the same 187 metrics. Rows marked Not disclosed have no numeric value and are excluded from charts and reconciliation checks.")
+            st.caption("Rows marked Not disclosed have no numeric value. Rows marked Derived from disclosed items show their summation in the source label and remain available for reconciled charts.")
+            st.caption("The Investment note sheet reconciles the note totals and components used by the Investment charts.")
         external_file = st.file_uploader("Choose external workbook", type="xlsx", key="step5_external_workbook")
         if external_file is not None and st.button("Import verified data", type="primary", icon=":material/check:"):
             try:
@@ -87,8 +126,6 @@ with st.container(key="report_screen_controls"):
     companies = sorted(records["Company"].unique())
     with st.container(border=True):
         st.subheader("Choose insurer")
-        if {"Sun Life Hong Kong", "Sun Life Hong Kong (Consolidated)"}.issubset(companies):
-            st.caption("Sun Life 2024 is consolidated; 2025 is company-only. Select them separately because the reporting scopes differ.")
         selected_company = st.selectbox(
             "Insurer to display", companies,
             index=companies.index(st.session_state.get("step5_active_insurer"))
@@ -100,11 +137,18 @@ with st.container(key="report_screen_controls"):
         if company not in companies:
             company = selected_company
             st.session_state["step5_active_insurer"] = company
+        if company in {"Sun Life Hong Kong", "Sun Life Hong Kong (Consolidated)"} and {
+            "Sun Life Hong Kong", "Sun Life Hong Kong (Consolidated)"
+        }.issubset(companies):
+            st.caption("Sun Life 2024 is consolidated; 2025 is company-only. Select them separately because the reporting scopes differ.")
         st.caption(f"Showing: {company}")
 rows = records[records["Company"].eq(company)].copy()
 period = max(rows["Period end"].astype(str))
 filing = filing_by_id(str(rows.loc[rows["Period end"].astype(str).eq(period), "Document ID"].iloc[0]))
-display_modules = report_modules_for_rows(rows)
+display_modules = tuple(
+    module for module in report_modules_for_rows(rows)
+    if module.section != "HKFRS 17 supplementary disclosures"
+)
 st.session_state.setdefault("insurer_secondary", "Profitability")
 all_mode, visible_modules = sidebar_report_navigation(
     display_modules, key="insurer", heading="Insurer report navigation",
@@ -114,7 +158,7 @@ if full_report:
     cover("HK IFRS 17 · Insurer report", company, f"Financial year ended {period} · {filing['currency']}")
 with st.container(key="report_screen_summary_top"):
     st.caption(f"{filing['legal_entity']} · {filing['scope']} · Year ended {period} · {filing['source_unit']}")
-    st.caption("Charts follow the source annual-report Step 7 module order. Movement charts show the latest available year. Mainland-only measures are omitted; additional HKFRS 17 note fields follow in a separate section.")
+    st.caption("Charts follow the source annual-report Step 7 module order. Movement charts show the latest available year. Mainland-only measures are omitted.")
 
 
 def _module_table(data: pd.DataFrame, codes: tuple[str, ...]) -> None:
@@ -131,15 +175,32 @@ def _render_module(module) -> None:
     anchor = slug(module.module_id + " " + module.title)
     st.markdown(f'<div id="{anchor}"></div>', unsafe_allow_html=True)
     with st.container(key=f"report_visual_{module.module_id}"):
-        if module.module_id not in {"csm_maturity_table", "summary_table", "six_dimensional_charts"}:
+        if module.module_id not in {"csm_maturity_table", "summary_table", "six_dimensional_charts", "oci_deep"}:
             st.markdown(f"#### {module.title}")
+            if module.module_id == "csm_ratio":
+                st.caption("Formula: |closing non-PAA insurance CSM| / |closing non-PAA present value of future cash flows (PVFCF) + closing non-PAA risk adjustment (RA)| × 100%. All three inputs use the same filing and note page. The denominator is matching fulfilment cash flows, not BEL.")
+            if module.module_id == "csm_ratio_trend":
+                st.caption("CSM amortization ratio = |CSM released for services| / "
+                           "(|closing CSM| + |CSM released for services|) × 100%. "
+                           "CSM replenishment ratio = |new-business CSM| / |CSM released for services| × 100%. "
+                           "The dashed 100% line equals 1×: above it, new business exceeds the year's release. "
+                           "The two panels have separate percentage axes, and point labels use two decimal places. "
+                           "Other movements also affect closing CSM.")
+            if module.module_id in {"inv_return", "inv_return_components", "uw_profit", "inv_profit", "inv_profit_components"}:
+                st.caption("Profit or loss (P&L) only; amounts recognised in OCI are excluded.")
+            if module.module_id == "uw_profit":
+                st.caption(NET_FINANCE_FORMULA)
+            elif module.module_id == "inv_profit":
+                st.caption(NET_INVESTMENT_FORMULA)
+                for note in net_investment_explanations([company]):
+                    st.caption(note)
         if module.module_id == "summary_table":
             chart = period_bars(data, ["TOTAL_LIABS", "EQUITY"], stacked=True)
             with st.container(key="report_figure_summary_table"):
                 st.markdown(f"#### {module.title}")
                 if chart is not None:
                     st.altair_chart(chart, width="stretch")
-                st.caption("Balance-sheet composition · Total liabilities + equity = total assets. Hover for the original PDF page and source label.")
+                st.caption("Balance-sheet composition · Total liabilities + equity = total assets. Hover for amounts.")
             with st.container(key="report_table_summary_table"):
                 st.markdown("**Financial Highlights table**")
                 render_financial_highlights_table(
@@ -147,32 +208,196 @@ def _render_module(module) -> None:
                                                include_source_comparatives=not preview), period,
                 )
                 st.caption("Percentages are rounded to whole numbers. Grey cells mean a matching source input is unavailable.")
-                if not preview and company == "Sun Life Hong Kong":
+                if not preview and company == "Sun Life Hong Kong" and period.startswith("2025"):
                     st.caption("Year-on-year figures use unaudited 2024 company comparatives in the 2025 filing; 2024 consolidated figures are excluded from this calculation.")
                 if not preview and company == "YF Life":
                     st.caption("YF Life CSM amortization combines the fair-value-transition and other-contract CSM release lines in the insurance note.")
+        elif module.module_id == "report_detail":
+            tables = insurance_service_appendix_tables(
+                rows, [company], sorted(rows["Period end"].astype(str).unique()),
+            )
+            render_appendix_year_tables(tables, unit_label=f"{filing['currency']} millions")
+            st.caption("Amounts use the filing currency in millions. † Calculated from matching "
+                       "reported lines. Not disclosed means no reviewed line at that method scope.")
+            if company == "YF Life":
+                st.caption("‡ All-method expense items from the liability carrying-amount "
+                           "movement are sign-adjusted to the profit-or-loss expense basis. "
+                           "Separate non-PAA and PAA expense totals are not disclosed.")
+        elif module.module_id == "nbv_table":
+            tables = new_business_appendix_tables(
+                rows, [company], sorted(rows["Period end"].astype(str).unique()),
+            )
+            render_appendix_year_tables(tables, unit_label=f"{filing['currency']} millions")
+            st.caption("† Analytical measure. New business IFRS profit margin = "
+                       "(new profitable contract CSM − initial loss component) / total PV of "
+                       "new-business cash inflows. CSM replenishment = |new-business CSM| / "
+                       "|CSM released|. The initial loss is shown as a deduction; reinsurance "
+                       "is excluded. Growth needs a matching prior-year filing.")
+        elif module.module_id == "oci_deep":
+            analysis = oci_comparison_rows(data)
+            selected_periods = sorted(rows["Period end"].astype(str).unique())
+            chart = oci_comparison_chart(analysis, [company], selected_periods)
+            with st.container(key="report_figure_oci_deep_chart"):
+                st.markdown(f"#### {module.title}")
+                if chart is not None:
+                    st.altair_chart(chart, width="stretch")
+                else:
+                    st.caption("No reviewed asset-side or insurance-finance OCI amount is available for this selection.")
+            with st.container(key="report_table_oci_deep"):
+                st.markdown("**Year-end FVOCI balance and annual OCI amounts**")
+                render_report_table(oci_comparison_table(analysis, [company], selected_periods))
+                for note in oci_comparison_notes(analysis, [company], selected_periods):
+                    st.caption(note)
         elif module.module_id == "six_dimensional_charts":
-            for group_number, (group_title, group_labels) in enumerate(PERFORMANCE_RATIO_PAGE_GROUPS, 1):
-                with st.container(key=f"report_figure_six_dimensional_charts_group_{group_number}"):
-                    st.markdown(f"#### {module.title}")
-                    st.markdown(f"**{group_title}**")
-                    chart, _gaps, _values = financial_performance_trends(data, list(group_labels))
+            with st.container(key="report_table_six_dimensional_charts"):
+                st.markdown(f"#### {module.title}")
+                render_financial_performance_table(financial_performance_ratio_table(
+                    data, [company], sorted(data["Period end"].astype(str).unique()),
+                ))
+                st.caption("Percentages are shown to two decimal places. "
+                           "Grey cells mean matching inputs are unavailable.")
+                if module.note:
+                    st.caption(module.note)
+        elif module.module_id == "oci_year_lat":
+            bridge, issues = oci_waterfall_rows(
+                plot_data, [company], sorted(plot_data["Period end"].astype(str).unique()),
+            )
+            chart, excluded = oci_waterfall_chart(bridge, [company])
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+                st.caption(f"Latest available year shown: {max(bridge['Year'])}YE.")
+                for note in oci_waterfall_notes(bridge):
+                    st.caption(note)
+            else:
+                st.caption("Missing inputs · A reconciled OCI bridge is unavailable for this selection.")
+            for issue in [*issues, *excluded]:
+                st.caption(issue)
+        elif module.module_id == "csm_table":
+            bridge, issues = csm_waterfall_rows(
+                plot_data, [company], sorted(plot_data["Period end"].astype(str).unique()),
+            )
+            chart, excluded = csm_waterfall_chart(bridge, [company])
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+                st.caption(f"Latest available year shown: {max(bridge['Year'])}YE.")
+                for note in csm_waterfall_notes(bridge):
+                    st.caption(note)
+            else:
+                st.caption("Missing inputs · A reconciled insurance CSM bridge is unavailable for this selection.")
+            for issue in [*issues, *excluded]:
+                st.caption(issue)
+        elif module.module_id == "equity_balance_comparison":
+            chart, excluded, summary = company_year_comparison_bars(
+                data, ["EQUITY"], companies=[company],
+                periods=sorted(data["Period end"].astype(str).unique()),
+                display_mode="Native currencies", unit="millions",
+            )
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+                if summary:
+                    st.caption(summary)
+                st.caption("Net assets = reported closing equity. Growth (%) = "
+                           "(current year-end net assets − prior year-end net assets) "
+                           "/ |prior year-end net assets| × 100%, using the same reporting scope.")
+            else:
+                st.caption("Missing inputs · A matching two-year net assets comparison is unavailable.")
+            for issue in excluded:
+                st.caption(issue)
+        elif module.module_id == "equity_trend":
+            bridge, issues = equity_waterfall_rows(
+                plot_data, [company], sorted(plot_data["Period end"].astype(str).unique()),
+            )
+            chart, excluded = equity_waterfall_chart(bridge, [company])
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+                st.caption(f"Latest available year shown: {max(bridge['Year'])}YE.")
+                for note in equity_waterfall_notes(bridge):
+                    st.caption(note)
+            else:
+                st.caption("Missing inputs · A reconciled equity bridge is unavailable for this selection.")
+            for issue in [*issues, *excluded]:
+                st.caption(issue)
+        elif module.module_id == "equity_movement_table":
+            table, issues = equity_movement_table(data, [company], [period])
+            if not table.empty:
+                render_equity_movement_table(table)
+                st.caption(f"{period[:4]}YE · Amounts in filing-currency millions. "
+                           "Net assets movement = closing equity − opening equity. "
+                           "Remainder* = net assets movement − the sum of displayed profit, OCI and "
+                           "disclosed equity movements; it is calculated, not separately disclosed. "
+                           "Not disclosed means a reviewed line is unavailable, not zero. "
+                           "Bond issuance and subsidiary consolidation are not separately extracted equity lines.")
+            else:
+                st.caption("Missing inputs · No equity movement detail is available for this selection.")
+            for issue in issues:
+                st.caption(issue)
+        elif module.module_id == "csm_rollforward_table":
+            table, issues = csm_rollforward_table(
+                plot_data, [company], sorted(plot_data["Period end"].astype(str).unique()),
+            )
+            if not table.empty:
+                render_csm_rollforward_table(table)
+                st.caption(f"Latest available year shown: {max(plot_data['Period end'].astype(str).str[:4])}YE · "
+                           "amounts in millions, in the filing currency shown beside the insurer.")
+                st.caption("Other movements* = closing CSM − opening CSM − new business CSM "
+                           "− CSM finance change − CSM estimate change − CSM release. "
+                           "This is a calculated reconciliation remainder, not a separately disclosed item. "
+                           "Missing inputs are shown as Not disclosed; no remainder is calculated for an incomplete bridge.")
+            else:
+                st.caption("Missing inputs · No insurance CSM roll-forward data are available for this selection.")
+            for issue in issues:
+                st.caption(issue)
+        elif module.module_id == "csm_trans":
+            transition, issues = csm_transition_rows(
+                data, [company], sorted(data["Period end"].astype(str).unique()),
+            )
+            chart = csm_transition_chart(transition, [company])
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+            else:
+                st.caption("Missing inputs · No insurance CSM transition-category data are available.")
+            for issue in issues:
+                st.caption(issue)
+        elif module.module_id == "csm_comp_lat":
+            current_year = max(plot_data["Period end"].astype(str).str[:4])
+            comparative_year = str(int(current_year) - 1)
+            for year, label in ((current_year, "Current year"),
+                                (comparative_year, "Comparative year")):
+                container_key = ("csm_comp_lat_current" if year == current_year
+                                 else "csm_comp_lat_comparative")
+                with st.container(key=container_key):
+                    st.markdown(f"**{year}YE · {label}**")
+                    year_rows = rows.loc[rows["Period end"].astype(str).str.startswith(year)]
+                    if year_rows.empty:
+                        st.caption(f"{year}YE · No source data are available for this insurer.")
+                        continue
+                    movements, issues = csm_pre_release_rows(
+                        year_rows, [company], sorted(year_rows["Period end"].astype(str).unique()),
+                    )
+                    chart, excluded, shown_currency = csm_pre_release_combined_chart(
+                        movements, [company],
+                    )
                     if chart is not None:
-                        with st.container(horizontal_alignment="center", key=f"performance_ratio_chart_group_{group_number}"):
-                            st.altair_chart(chart, width="content")
+                        st.altair_chart(chart, width="stretch")
+                        st.caption(f"Shared amount axis: {shown_currency} millions.")
                     else:
-                        st.caption("Missing inputs · Matching reviewed ratio components are unavailable.")
-                    if group_number == 2:
-                        st.caption("Hover for exact values. Ratios with missing inputs are omitted.")
-                        if module.note:
-                            st.caption(module.note)
-            yield_chart, _gaps, _values = financial_performance_trends(data, ["Investment yield"])
-            if yield_chart is not None:
-                with st.container(key="report_figure_six_dimensional_charts_yield"):
-                    st.markdown(f"#### {module.title} · Investment yield")
-                    with st.container(horizontal_alignment="center", key="performance_ratio_chart_yield"):
-                        st.altair_chart(yield_chart, width="content")
-                    st.caption("Investment yield uses the rate disclosed in the filing.")
+                        st.caption(f"{year}YE · A complete three-item pre-release CSM mix is unavailable.")
+                    for issue in [*issues, *excluded]:
+                        st.caption(issue)
+            st.caption("Column segments show signed new-business, estimate and finance CSM movements. "
+                       "Percentage labels = |item| / (|new business| + |estimate change| + |finance change|) × 100%. "
+                       "Negative items extend below zero. Opening CSM, CSM release and other movements are excluded; "
+                       "these percentages are not shares of closing CSM.")
+        elif module.module_id == "csm_ratio_trend":
+            chart, gaps, _ = csm_ratio_trend_chart(
+                data, [company], sorted(data["Period end"].astype(str).unique()),
+            )
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+            else:
+                st.caption("Missing inputs · Matching reviewed CSM ratios are unavailable for this filing.")
+            for _, gap in gaps.iterrows():
+                st.caption(f"{gap['Period'][:4]}YE · {gap['Ratio']}: matching inputs unavailable.")
         elif module.module_id in RATIO_MODULE_LABELS and module.module_id not in COMPANY_YEAR_COMPARISON_IDS:
             chart, _gaps = ratio_module_period_bars(
                 data, list(RATIO_MODULE_LABELS[module.module_id]),
@@ -187,37 +412,33 @@ def _render_module(module) -> None:
             summary = discount_rate_summary(
                 data, [company], sorted(rows["Period end"].astype(str).unique()),
             )
-            render_discount_rate_table(summary)
-            st.caption("Each range spans the disclosed 1Y, 5Y, 10Y, 15Y and 20Y spot rates. "
-                       "Currencies and risk-free versus illiquidity-premium assumptions are kept separate.")
+            if summary.empty:
+                st.caption("No reviewed discount-rate tenor disclosure is available for this selection.")
+            else:
+                render_discount_rate_table(summary)
         elif module.module_id == "confidence_level":
-            _module_table(data, module.metrics)
+            summary = confidence_level_summary(
+                data, [company], sorted(data["Period end"].astype(str).unique()),
+            )
+            render_confidence_level_table(summary)
         elif module.module_id == "csm_maturity_table":
-            maturity = {
-                kind: csm_maturity_lines(plot_data, kind=kind, companies=[company])
-                for kind in ("Insurance", "Reinsurance")
-            }
-            available = [kind for kind, (chart, _) in maturity.items() if chart is not None]
-            for kind in ("Insurance", "Reinsurance"):
-                chart, missing = maturity[kind]
-                if chart is not None:
-                    suffix = "_following" if kind != available[0] else ""
-                    with st.container(key=f"report_figure_{module.module_id}_{kind.lower()}{suffix}"):
-                        if kind == available[0]:
-                            st.markdown(f"#### {module.title}")
-                        st.markdown(f"**{kind} CSM**")
-                        st.altair_chart(chart, width="stretch")
-                        if kind == available[-1]:
-                            st.caption(f"Latest available year shown: {max(plot_data['Period end'].astype(str))[:4]}YE. "
-                                       "Lines show cumulative share through 1, 5 and 10 years where disclosed. "
-                                       "A missing first-five-years split is derived from closing CSM and later buckets; "
-                                       "the over-10-year bucket remains in the denominator and hover details.")
-                            if module.note:
-                                st.caption(module.note)
-                elif missing:
-                    st.caption(f"{kind} CSM · Matching maturity buckets and closing CSM are unavailable for a percentage curve.")
-            if not available:
+            chart, missing = csm_maturity_lines(
+                plot_data, kind="Insurance", companies=[company],
+            )
+            with st.container(key=f"report_figure_{module.module_id}_insurance"):
                 st.markdown(f"#### {module.title}")
+                if chart is not None:
+                    st.altair_chart(chart, width="stretch")
+                    st.caption(f"Latest available year shown: {max(plot_data['Period end'].astype(str))[:4]}YE. "
+                               "Lines show cumulative share through 1, 5 and 10 years where disclosed. "
+                               "A missing first-five-years split is derived from closing CSM and later buckets; "
+                               "the over-10-year bucket remains in the denominator and hover details.")
+                if module.note:
+                    st.caption(module.note)
+                for note in module_company_disclosure_notes(module.module_id, [company]):
+                    st.caption(note)
+                if missing:
+                    st.caption("Insurance CSM · Matching maturity buckets and closing CSM are unavailable for a percentage curve.")
         elif module.module_id in {"comp_1", "comp_2"}:
             is_method_split = module.module_id == "comp_1"
             chart = revenue_stack_bars(
@@ -228,13 +449,31 @@ def _render_module(module) -> None:
             if chart is not None:
                 st.altair_chart(chart, width="stretch")
                 st.caption(
-                    "Percentage labels use the PAA + non-PAA revenue total. Hover for amounts and source pages."
+                    "Each bar is 100% of PAA + non-PAA revenue. Hover for both component amounts."
                     if is_method_split else
-                    "Percentage labels use reported non-PAA revenue. Negative components extend below zero; hover for signed amounts and source pages."
+                    "Percentage labels use reported non-PAA revenue. Negative components extend below zero; hover for signed amounts."
                 )
             else:
                 st.caption("Missing inputs · A matching revenue split and total are unavailable.")
-        elif module.module_id in COMPANY_YEAR_COMPARISON_IDS:
+        elif module.module_id == "nb_value_ratios":
+            st.caption(RATIO_EXPLANATION)
+            ratio_rows, gaps = new_business_ratio_rows(
+                data, [company], sorted(data["Period end"].astype(str).unique()),
+            )
+            for ratio in RATIO_TITLES:
+                chart, _mean = new_business_ratio_chart(
+                    ratio_rows, ratio, companies=[company],
+                    periods=sorted(data["Period end"].astype(str).unique()),
+                    show_mean=False,
+                )
+                if chart is not None:
+                    st.markdown(f"**{ratio}**")
+                    st.altair_chart(chart, width="stretch")
+            if ratio_rows.empty:
+                st.caption("Missing inputs · Matching new-business ratios are unavailable.")
+            for gap in gaps:
+                st.caption(gap)
+        elif module.module_id in COMPANY_YEAR_COMPARISON_IDS - {"inv_return", "inv_profit"}:
             if module.module_id == "exp_total":
                 st.caption("Expense magnitude is shown as a positive amount; the source statement reports it as a deduction. Hover for the signed amount.")
             comparison_labels, comparison_font_size, comparison_bar_width = True, 11, 36
@@ -280,14 +519,77 @@ def _render_module(module) -> None:
                     st.altair_chart(chart, width="content")
             else:
                 st.caption("Missing inputs · No reviewed pre-tax profit or profit values are available.")
+        elif module.module_id in {"prof_2025", "prof_2024"}:
+            components = service_result_component_rows(plot_data)
+            chart = service_result_period_bars(components)
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+                for note in service_result_notes(components):
+                    st.caption(note)
+            else:
+                st.caption("Missing inputs · A complete five-item bridge to the reported insurance service result is unavailable.")
+        elif module.module_id in {"inv_return", "inv_return_components", "uw_profit", "inv_profit", "inv_profit_components"}:
+            views = {
+                "inv_return": (("return_pl_total", None),),
+                "inv_return_components": (("return_pl_components", None),),
+                "uw_profit": (("finance_pl_total", None),),
+                "inv_profit": (("result_pl_total", None),),
+                "inv_profit_components": (("result_pl_components", None),),
+            }[module.module_id]
+            first_rows = investment_note_rows(plot_data, views[0][0])
+            for view, heading in views:
+                note_rows = first_rows if view == views[0][0] else investment_note_rows(plot_data, view)
+                chart = investment_note_period_bars(note_rows)
+                if chart is not None:
+                    if heading:
+                        st.markdown(f"**{heading}**")
+                    st.altair_chart(chart, width="stretch")
+            if first_rows.empty:
+                st.caption("Missing inputs · A matching, reconciled P&L investment breakdown is unavailable.")
+            else:
+                for note in investment_note_captions(first_rows):
+                    st.caption(note)
+        elif module.module_id == "asset_struct":
+            components, issues = financial_investment_rows(
+                plot_data, [company], sorted(plot_data["Period end"].astype(str).unique()),
+            )
+            chart, excluded = financial_investment_chart(components, [company])
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+                for note in financial_investment_notes(components):
+                    st.caption(note)
+            else:
+                st.caption("Missing inputs · A complete, reconciled financial-investment breakdown is unavailable.")
+            for issue in [*issues, *excluded]:
+                st.caption(issue)
+        elif module.module_id == "nb_struct":
+            margin_rows, issues = new_business_ifrs_margin_rows(
+                data, [company], sorted(data["Period end"].astype(str).unique()),
+            )
+            chart = new_business_ifrs_margin_chart(
+                margin_rows, companies=[company],
+                periods=sorted(data["Period end"].astype(str).unique()),
+            )
+            if chart is not None:
+                with st.container(horizontal_alignment="center", key="nb_ifrs_margin_layout"):
+                    with st.container(width=1050):
+                        st.altair_chart(chart, width="stretch")
+            else:
+                st.caption("Missing inputs · A matched new-business IFRS profit margin is unavailable.")
+            st.caption(IFRS_MARGIN_EXPLANATION)
+            for issue in issues:
+                st.caption(issue)
         else:
             stacked = module.module_id in STACKED_AMOUNT_MODULE_IDS
+            if module.module_id == "nb_lost":
+                st.caption("Initial-recognition presentation: CSM, risk adjustment, initial loss and PV of outflows are positive; PV of inflows is negative. Original filing signs remain in the source cells.")
             if module.module_id == "exp_1":
-                st.caption("Selected items from insurance expense notes, shown as amounts: positive values increase expense; negative values reduce it. Disclosures differ by insurer and are not a complete breakdown, so percentages and totals are omitted. Hover for the PDF page and source line.")
+                st.caption("Stack height shows disclosed non-PAA expense amounts. Whole-number labels show each item's signed share of the absolute total of displayed items; negative items extend below zero. These items may not form a complete expense breakdown.")
             chart = period_bars(
                 plot_data, list(stacked_component_metrics(module) if stacked else module.metrics),
                 stacked=stacked,
                 expense_mode="contribution" if module.module_id == "exp_1" else None,
+                show_small_percent_labels=module.module_id == "exp_1",
                 color_by_period=module.module_id in YEAR_COLORED_MODULE_IDS,
                 show_labels=(module.module_id not in MOVEMENT_MODULE_IDS
                              and module.module_id not in HOVER_ONLY_LABEL_MODULE_IDS),
@@ -308,22 +610,13 @@ def _render_module(module) -> None:
             else:
                 st.caption("Missing inputs · No reviewed values are available for these indicators and periods.")
         if module.module_id not in {"csm_maturity_table", "six_dimensional_charts"}:
-            missing = missing_metrics(plot_data, module)
-            if missing and len(missing) < len(module.metrics):
+            missing = missing_metrics(plot_data, module) if module.module_id not in {"oci_deep", "oci_year_lat", "asset_struct", "csm_trans"} else []
+            if module.module_id not in {"discount_rate", "report_detail", "nbv_table"} and missing and len(missing) < len(module.metrics):
                 st.caption(f"Partially disclosed · {len(missing)} of {len(module.metrics)} source indicators are unavailable.")
-            if module.note:
+            if module.note and module.module_id != "oci_deep":
                 st.caption(module.note)
-    if module.module_id == "inv_profit":
-        bridge = investment_result_reconciliation(rows)
-        if not bridge.empty:
-            with st.container(key="report_table_inv_profit"):
-                st.markdown("**Profit-or-loss reconciliation**")
-                render_report_table(bridge)
-                st.caption("Original statement currencies, millions. The investment-contract liability movement "
-                           "is calculated from the reported lines; it matches the separately disclosed FWD and YF line. "
-                           "Sun Life has no such movement in this subtotal.")
-
-
+            for note in module_company_disclosure_notes(module.module_id, [company]):
+                st.caption(note)
 with st.container(key="report_screen_summary_charts"):
     st.subheader("Year-on-year view")
     st.caption("The charts below follow the sidebar selection. Choose All charts in the sidebar for the complete report.")

@@ -1,0 +1,56 @@
+[
+  {
+    "document_id": "SUN_2025",
+    "company": "Sun Life Hong Kong",
+    "period": "2025-12-31",
+    "metric_code": "OCI_ECL_ADJUSTMENT",
+    "amount_millions": -1.0,
+    "statement_line": "Adjustment on expected credit loss",
+    "pdf_page": 14
+  },
+  {
+    "document_id": "YF_2024",
+    "company": "YF Life",
+    "period": "2024-12-31",
+    "metric_code": "OCI_FAIR_VALUE_RESERVE",
+    "amount_millions": -1236.05092,
+    "statement_line": "Net movement in the fair value reserve during the year recognised in other comprehensive income",
+    "pdf_page": 25
+  },
+  {
+    "document_id": "YF_2024",
+    "company": "YF Life",
+    "period": "2024-12-31",
+    "metric_code": "OCI_FX_TRANSLATION",
+    "amount_millions": -72.865661,
+    "statement_line": "Exchange differences arising on translation of results of foreign operations",
+    "pdf_page": 25
+  },
+  {
+    "document_id": "YF_2024",
+    "company": "YF Life",
+    "period": "2024-12-31",
+    "metric_code": "OCI_REINS_FINANCE",
+    "amount_millions": 180.381305,
+    "statement_line": "Net finance income from reinsurance contracts",
+    "pdf_page": 25
+  },
+  {
+    "document_id": "YF_2025",
+    "company": "YF Life",
+    "period": "2025-12-31",
+    "metric_code": "OCI_FAIR_VALUE_RESERVE",
+    "amount_millions": 785.780024,
+    "statement_line": "Net movement in the fair value reserve during the year recognised in other comprehensive income",
+    "pdf_page": 28
+  },
+  {
+    "document_id": "YF_2025",
+    "company": "YF Life",
+    "period": "2025-12-31",
+    "metric_code": "OCI_FX_TRANSLATION",
+    "amount_millions": 2.574158,
+    "statement_line": "Exchange differences arising on translation of results of foreign operations",
+    "pdf_page": 28
+  }
+]

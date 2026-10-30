@@ -16,9 +16,9 @@ st.set_page_config(
 )
 pages = [
     st.Page("app_pages/00_library.py", title="Step 0 · Filing monitor", icon=":material/travel_explore:", url_path="filings"),
-    st.Page("app_pages/01_extract.py", title="Step 1 · Locate & extract", icon=":material/document_scanner:", url_path="extract"),
-    st.Page("app_pages/02_review.py", title="Step 2 · Review", icon=":material/fact_check:", url_path="review"),
-    st.Page("app_pages/03_publish.py", title="Step 3 · Publish", icon=":material/publish:", url_path="publish"),
+    st.Page("app_pages/01_extract.py", title="Step 1 · Locate pages", icon=":material/document_scanner:", url_path="extract"),
+    st.Page("app_pages/02_review.py", title="Step 2 · Extract & review", icon=":material/fact_check:", url_path="review"),
+    st.Page("app_pages/03_publish.py", title="Step 3 · Check & publish", icon=":material/publish:", url_path="publish"),
     st.Page("app_pages/04_integrate.py", title="Step 4 · Integrate", icon=":material/merge_type:", url_path="integrate"),
     st.Page("app_pages/05_insurer.py", title="Step 5 · Insurer explorer", icon=":material/analytics:", url_path="insurer"),
     st.Page("app_pages/06_peers.py", title="Step 6 · Peer comparison", icon=":material/bar_chart:", url_path="peers"),

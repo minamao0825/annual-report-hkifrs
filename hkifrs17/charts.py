@@ -134,9 +134,9 @@ def _expense_display_rows(rows: pd.DataFrame, mode: str | None) -> pd.DataFrame:
     return rows
 
 
-def _stack_percent_label(share: float) -> str:
+def _stack_percent_label(share: float, minimum: float = 10) -> str:
     """Keep small segments in the tooltip and round visible shares to integers."""
-    return f"{share:.0f}%" if abs(share) >= 10 else ""
+    return f"{share:.0f}%" if abs(share) >= minimum else ""
 
 
 def _hide_colliding_labels(rows: pd.DataFrame, *, label_column: str,
@@ -215,9 +215,16 @@ def _grouped_period_bars(rows: pd.DataFrame, metric_order: list[str], *,
                          show_labels: bool = True, decimals: int = 1,
                          transparent: bool = True, stacked: bool = False,
                          percentage_labels: bool = False,
+                         show_small_percent_labels: bool = False,
+                         normalized_share: bool = False,
                          color_by_period: bool = False,
                          alternative_metric_labels: bool = False,
-                         shared_y: bool = False) -> alt.TopLevelMixin | None:
+                         shared_y: bool = False,
+                         metric_colors: dict[str, str] | None = None,
+                         minimum_percent_label: float = 10,
+                         white_label_metric: str | None = None,
+                         absolute_share_labels: bool = False,
+                         reference_line: float | None = None) -> alt.TopLevelMixin | None:
     """Period on x, separate indicator bars; optionally facet one panel per company."""
     rows = rows.dropna(subset=["Amount"]).copy().reset_index(drop=True)
     if rows.empty:
@@ -239,19 +246,35 @@ def _grouped_period_bars(rows: pd.DataFrame, metric_order: list[str], *,
     rows["Period label"] = rows["Period"].map(period_label)
     display_periods = [period_label(period) for period in periods]
     chart_height = 300 if company_order is None else 270
-    percent_suffix = "%" if unit_title.endswith("(%)") else ""
+    percent_suffix = "%" if unit_title.endswith("(%)") else "×" if unit_title == "Times (×)" else ""
     rows["Value label"] = rows["Amount"].map(
         lambda value: f"{value:,.{decimals}f}{percent_suffix}"
     )
-    colors = [KPMG_BRIGHT_CHART_COLORS[index % len(KPMG_BRIGHT_CHART_COLORS)]
-              for index in range(len(present))]
+    colors = [
+        (metric_colors or {}).get(label, KPMG_BRIGHT_CHART_COLORS[index % len(KPMG_BRIGHT_CHART_COLORS)])
+        for index, label in enumerate(present)
+    ]
     period_scale = alt.Scale(paddingInner=0.5, paddingOuter=0.45)
     x = alt.X("Period label:N", sort=display_periods, title=None, scale=period_scale,
               axis=alt.Axis(labelAngle=0, labelLimit=90))
     x_offset = alt.XOffset("Metric:N", sort=present)
-    y = alt.Y("Amount:Q", title=unit_title, stack="zero" if stacked else None,
-              scale=alt.Scale(zero=True),
-              axis=alt.Axis(format=",.2~f" if shared_y else "~s"))
+    if normalized_share:
+        rows["Share midpoint"] = 0.0
+        rows["Percent label"] = rows["Share (%)"].map(lambda share: f"{share:.1f}%")
+        group_keys = [column for column in ("Company", "Document ID", "Period")
+                      if column in rows]
+        for _, group in rows.groupby(group_keys, sort=False, dropna=False):
+            cumulative = 0.0
+            for index, share in group.sort_values("Stack order")["Share (%)"].items():
+                rows.at[index, "Share midpoint"] = cumulative + share / 2
+                cumulative += share
+        y = alt.Y("Share (%):Q", title="Share (%)", stack="zero",
+                  scale=alt.Scale(domain=[0, 100]),
+                  axis=alt.Axis(values=[0, 25, 50, 75, 100], format=".0f"))
+    else:
+        y = alt.Y("Amount:Q", title=unit_title, stack="zero" if stacked else None,
+                  scale=alt.Scale(zero=True),
+                  axis=alt.Axis(format=",.2~f" if shared_y else "~s"))
     legend = alt.Legend(orient="bottom", direction="vertical",
                         title=None, labelLimit=1000, columns=1)
     period_colors = color_by_period and (len(present) == 1 or alternative_metric_labels)
@@ -271,9 +294,13 @@ def _grouped_period_bars(rows: pd.DataFrame, metric_order: list[str], *,
                 positive = negative = 0.0
                 denominator = float(group["Amount"].abs().sum())
                 for index, amount in group.sort_values("Stack order")["Amount"].items():
-                    share = 100 * amount / denominator if denominator else 0.0
+                    share = (100 * (abs(amount) if absolute_share_labels else amount)
+                             / denominator if denominator else 0.0)
                     rows.at[index, "Share (%)"] = share
-                    rows.at[index, "Percent label"] = _stack_percent_label(share)
+                    rows.at[index, "Percent label"] = (
+                        f"{share:.0f}%" if show_small_percent_labels else
+                        _stack_percent_label(share, minimum_percent_label)
+                    )
                     if amount >= 0:
                         rows.at[index, "Label midpoint"] = positive + amount / 2
                         positive += amount
@@ -283,12 +310,20 @@ def _grouped_period_bars(rows: pd.DataFrame, metric_order: list[str], *,
     if show_labels:
         font_size = (9 if stacked else
                      8 if len(company_order or []) >= 4 or len(present) >= 5 else 10)
-        rows = _hide_colliding_labels(
-            rows, label_column="Percent label" if stacked else "Value label",
+        label_rows = rows.copy() if normalized_share else rows
+        if normalized_share:
+            label_rows["Amount"] = label_rows["Share (%)"]
+            label_rows["Label midpoint"] = label_rows["Share midpoint"]
+        label_rows = _hide_colliding_labels(
+            label_rows, label_column="Percent label" if stacked else "Value label",
             metrics=present, periods=display_periods, company_order=company_order,
             stacked=stacked, period_colors=period_colors, shared_y=shared_y,
             font_size=font_size, chart_height=chart_height,
         )
+        if normalized_share:
+            rows["Percent label"] = label_rows["Percent label"]
+        else:
+            rows = label_rows
     if period_colors:
         color = alt.Color(
             "Period label:N",
@@ -299,19 +334,33 @@ def _grouped_period_bars(rows: pd.DataFrame, metric_order: list[str], *,
         )
     else:
         color = alt.Color("Metric:N", scale=alt.Scale(domain=present, range=colors), legend=legend)
-    tooltip = ["Company:N", "Period:N", "Metric:N", alt.Tooltip("Amount:Q", format=",.2f"),
-               "Currency:N", "Source:N"] if "Company" in rows else [
-                   "Period:N", "Metric:N", alt.Tooltip("Amount:Q", format=",.2f"), "Source:N"]
+    amount_tooltips = ([
+        alt.Tooltip("Non-PAA amount:Q", title=f"Non-PAA ({unit_title})", format=",.2f"),
+        alt.Tooltip("PAA amount:Q", title=f"PAA ({unit_title})", format=",.2f"),
+    ] if normalized_share else [alt.Tooltip("Amount:Q", format=",.2f")])
+    tooltip = (["Company:N", "Period:N", *amount_tooltips, "Currency:N"]
+               if "Company" in rows else ["Period:N", *amount_tooltips])
     if "USD/HKD rate" in rows:
         tooltip.extend([alt.Tooltip("USD/HKD rate:Q", format=".4f"), "FX rate date:N"])
     if "Original source amount (millions)" in rows:
         tooltip.extend([
-            alt.Tooltip("Original source amount (millions):Q", format=",.3f"),
-            "Original source currency:N",
+            alt.Tooltip("Original source amount (millions):Q", title="Original amount (millions)", format=",.3f"),
+            alt.Tooltip("Original source currency:N", title="Original currency"),
         ])
     if "Accounting signed amount" in rows:
         tooltip.append(alt.Tooltip("Accounting signed amount:Q", format=",.2f",
                                    title="Signed amount (chart unit)"))
+    if "Reported total" in rows:
+        total_title = ("Investment note total (chart unit)" if "View" in rows
+                       else "Reported insurance service result (chart unit)")
+        tooltip.append(alt.Tooltip("Reported total:Q", format=",.3f",
+                                   title=total_title))
+    if "Calculation detail" in rows:
+        tooltip.append(alt.Tooltip("Calculation detail:N", title="Calculation"))
+    if "Presentation basis" in rows:
+        tooltip.append(alt.Tooltip("Presentation basis:N", title="Basis"))
+    if "Compared with 1×" in rows:
+        tooltip.append(alt.Tooltip("Compared with 1×:N"))
     if stacked:
         share_title = ("Share of absolute components (%)" if not percentage_labels
                        else "Share (%)")
@@ -327,19 +376,30 @@ def _grouped_period_bars(rows: pd.DataFrame, metric_order: list[str], *,
         cornerRadiusTopLeft=2, cornerRadiusTopRight=2,
     ).encode(**bar_encoding)
     layers = [bars]
+    if reference_line is not None:
+        rows["Reference level"] = reference_line
+        layers.append(alt.Chart(rows).mark_rule(
+            color=KPMG_INK, strokeDash=[6, 4], strokeWidth=1.5, tooltip=False,
+        ).encode(y=alt.Y("Reference level:Q", title=None)))
     if show_labels:
-        label_encoding = dict(x=x, y=alt.Y("Label midpoint:Q", stack=None),
+        label_encoding = dict(x=x, y=alt.Y(
+            "Share midpoint:Q" if normalized_share else "Label midpoint:Q", stack=None),
                               text="Percent label:N" if stacked else "Value label:N")
         if period_colors:
             label_encoding["color"] = alt.condition(
                 alt.datum["Period label"] == "2025YE",
                 alt.value("#FFFFFF"), alt.value(KPMG_INK),
             )
+        elif white_label_metric is not None:
+            label_encoding["color"] = alt.condition(
+                alt.datum.Metric == white_label_metric,
+                alt.value("#FFFFFF"), alt.value(KPMG_INK),
+            )
         elif not stacked:
             label_encoding["xOffset"] = x_offset
         text_style = dict(fontSize=font_size, fontWeight="bold",
                           baseline="middle", tooltip=False)
-        if not period_colors:
+        if not period_colors and white_label_metric is None:
             text_style["color"] = KPMG_INK
         labels = alt.Chart(rows).mark_text(**text_style).encode(
             **label_encoding,
@@ -392,20 +452,33 @@ def period_bars(frame: pd.DataFrame, codes: list[str], *, unit_title: str | None
                 reported_labels: dict[str, str] | None = None,
                 display_label: str | None = None,
                 alternative_metric_labels: bool = False,
-                expense_mode: str | None = None) -> alt.Chart | None:
+                expense_mode: str | None = None,
+                show_small_percent_labels: bool = False,
+                metric_labels: dict[str, str] | None = None,
+                metric_colors: dict[str, str] | None = None,
+                white_label_metric: str | None = None,
+                absolute_share_labels: bool = False,
+                minimum_percent_label: float = 10) -> alt.Chart | None:
     rows = _use_reported_company_labels(figure_rows(frame, codes), reported_labels)
     if rows.empty:
         return None
+    if metric_labels:
+        rows["Metric"] = rows["Metric code"].map(metric_labels).fillna(rows["Metric"])
     rows = _expense_display_rows(rows, expense_mode)
     if display_label is not None:
         rows["Metric"] = display_label
-    order = (list(dict.fromkeys(rows["Metric"])) if reported_labels or display_label else
+    order = (list(dict.fromkeys(rows["Metric"])) if reported_labels or display_label or metric_labels else
              [METRIC_BY_CODE[code].label for code in codes])
     return _grouped_period_bars(rows, order, periods=sorted(rows["Period"].unique()),
                                 unit_title=unit_title or f"{rows['Currency'].iloc[0]} millions",
                                 stacked=stacked, color_by_period=color_by_period,
                                 show_labels=show_labels,
-                                alternative_metric_labels=alternative_metric_labels)
+                                show_small_percent_labels=show_small_percent_labels,
+                                alternative_metric_labels=alternative_metric_labels,
+                                metric_colors=metric_colors,
+                                white_label_metric=white_label_metric,
+                                absolute_share_labels=absolute_share_labels,
+                                minimum_percent_label=minimum_percent_label)
 
 
 def tax_profit_bars(
@@ -507,13 +580,13 @@ def tax_profit_bars(
     bar_base = common.transform_filter(alt.datum["Row kind"] == "bar").encode(
         x=x, xOffset=alt.XOffset("Metric:N", sort=["Profit before tax", "Profit"]),
     )
-    bar_tooltip = ["Company:N", "Period:N", "Metric:N",
+    bar_tooltip = ["Company:N", "Period:N",
                    alt.Tooltip("Amount:Q", title=f"{unit.title()}", format=",.2f"),
-                   "Currency:N", "Source:N"]
+                   "Currency:N"]
     if "Original source amount (millions)" in bars:
         bar_tooltip.extend([
-            alt.Tooltip("Original source amount (millions):Q", format=",.3f"),
-            "Original source currency:N",
+            alt.Tooltip("Original source amount (millions):Q", title="Original amount (millions)", format=",.3f"),
+            alt.Tooltip("Original source currency:N", title="Original currency"),
         ])
     layers = [bar_base.mark_bar(width=alt.RelativeBandSize(0.88), opacity=0.96,
                                 cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
@@ -597,8 +670,8 @@ def _period_rate_lines(rows: pd.DataFrame, metric_order: list[str], *,
         legend=alt.Legend(orient="bottom", direction="vertical", title=None,
                           labelLimit=1000, columns=1),
     )
-    tooltip = ["Period:N", "Metric:N",
-               alt.Tooltip("Amount:Q", title="Rate (%)", format=".2f"), "Source:N"]
+    tooltip = ["Period:N",
+               alt.Tooltip("Amount:Q", title="Rate (%)", format=".2f")]
     if company_order is not None:
         tooltip.insert(0, "Company:N")
     chart = alt.Chart(rows).mark_line(point=True, strokeWidth=2.5).encode(
@@ -745,8 +818,7 @@ def csm_maturity_lines(frame: pd.DataFrame, *, kind: str,
                alt.Tooltip("Cumulative share:Q", title="Cumulative share", format=".1%"),
                alt.Tooltip("Cumulative amount:Q", title="Cumulative amount (millions)", format=",.2f"),
                "Currency:N",
-               alt.Tooltip("Over 10Y share:Q", title="After 10 years", format=".1%"),
-               "Source:N"]
+               alt.Tooltip("Over 10Y share:Q", title="After 10 years", format=".1%")]
     lines = alt.Chart(rows).mark_line(
         point=True, strokeWidth=2.5, strokeDash=[6, 4],
     ).encode(
@@ -788,6 +860,9 @@ def _revenue_stack_rows(frame: pd.DataFrame, codes: list[str], *,
     for (document_id, period), group in rows.groupby(["Document ID", "Period"], sort=False):
         if require_all and set(group["Metric code"]) != set(codes):
             continue
+        if require_all and denominator_code is None and group["Amount"].lt(0).any():
+            # A signed revenue component cannot be represented as a 0–100% share.
+            continue
         if group["Currency"].nunique() != 1:
             continue
         group = group.copy()
@@ -814,6 +889,30 @@ def _revenue_stack_rows(frame: pd.DataFrame, codes: list[str], *,
     return pd.DataFrame(output)
 
 
+def _revenue_method_split_amounts(rows: pd.DataFrame) -> pd.DataFrame:
+    """Keep both disclosed amounts on every percentage segment's hover."""
+    amounts = rows.pivot_table(
+        index=["Document ID", "Period"], columns="Metric code",
+        values="Amount", aggfunc="first",
+    )
+    amounts = amounts[["REV_NONPAA_TOTAL", "REV_PAA_TOTAL"]].rename(columns={
+        "REV_NONPAA_TOTAL": "Non-PAA amount", "REV_PAA_TOTAL": "PAA amount",
+    })
+    return rows.join(amounts, on=["Document ID", "Period"])
+
+
+def _revenue_stack_display(rows: pd.DataFrame, codes: list[str],
+                           denominator_code: str | None) -> tuple[pd.DataFrame, list[str]]:
+    """Use shorter legend labels only for non-PAA revenue composition."""
+    labels = [METRIC_BY_CODE[code].label for code in codes]
+    if denominator_code != "REV_NONPAA_TOTAL":
+        return rows, labels
+    labels = [label.removeprefix("Revenue: ") for label in labels]
+    rows = rows.copy()
+    rows["Metric"] = rows["Metric code"].astype(str).map(dict(zip(codes, labels)))
+    return rows, labels
+
+
 def revenue_stack_bars(frame: pd.DataFrame, codes: list[str], *,
                        denominator_code: str | None = None,
                        require_all: bool = False) -> alt.TopLevelMixin | None:
@@ -822,11 +921,16 @@ def revenue_stack_bars(frame: pd.DataFrame, codes: list[str], *,
                                require_all=require_all)
     if rows.empty:
         return None
+    method_split = (require_all and denominator_code is None and
+                    set(codes) == {"REV_NONPAA_TOTAL", "REV_PAA_TOTAL"})
+    if method_split:
+        rows = _revenue_method_split_amounts(rows)
+    rows, labels = _revenue_stack_display(rows, codes, denominator_code)
     return _grouped_period_bars(
-        rows, [METRIC_BY_CODE[code].label for code in codes],
+        rows, labels,
         periods=sorted(rows["Period"].unique()),
         unit_title=f"{rows['Currency'].iloc[0]} millions", stacked=True,
-        percentage_labels=True,
+        percentage_labels=True, normalized_share=method_split,
     )
 
 
@@ -836,8 +940,8 @@ RATIO_INPUTS = (
     ("Equity / total assets", ("EQUITY", "TOTAL_ASSETS")),
     ("Return on average equity", ("PROFIT", "EQUITY_OPEN", "EQUITY")),
     ("Insurance CSM year-on-year growth", ("CSM_OPEN", "CSM_CLOSE")),
-    ("CSM release / opening CSM", ("CSM_RELEASE", "CSM_OPEN")),
-    ("New business CSM / opening CSM", ("CSM_NEW", "CSM_OPEN")),
+    ("CSM amortization ratio", ("CSM_CLOSE", "CSM_RELEASE")),
+    ("New business CSM / CSM release", ("CSM_NEW", "CSM_RELEASE")),
     ("New profitable contract CSM / PV inflows", ("NB_INS_PROFIT_CSM", "NB_INS_PROFIT_PV_IN")),
     ("Insurance CSM / matching fulfilment cash flows",
      ("INS_NONPAA_CSM_CLOSE", "INS_NONPAA_PVFCF_CLOSE", "INS_NONPAA_RA_CLOSE")),
@@ -875,11 +979,23 @@ def analytical_ratio_rows(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
                     amount = 100 * lookup["PROFIT"] / average
             elif label == "Insurance CSM year-on-year growth" and lookup["CSM_OPEN"] != 0:
                 amount = 100 * (abs(lookup["CSM_CLOSE"]) / abs(lookup["CSM_OPEN"]) - 1)
-            elif label in {"CSM release / opening CSM", "New business CSM / opening CSM"}:
+            elif label == "CSM amortization ratio":
                 source = numeric[numeric["Metric code"].isin(required)]
-                if source["PDF page"].nunique() == 1 and lookup["CSM_OPEN"] != 0:
-                    numerator = "CSM_RELEASE" if label.startswith("CSM release") else "CSM_NEW"
-                    amount = 100 * abs(lookup[numerator]) / abs(lookup["CSM_OPEN"])
+                same_filing = "Document ID" not in source or source["Document ID"].nunique() == 1
+                same_scope = "Scope" not in source or source["Scope"].nunique() == 1
+                unique_inputs = len(source) == len(required) and source["Metric code"].nunique() == len(required)
+                denominator = abs(lookup["CSM_CLOSE"]) + abs(lookup["CSM_RELEASE"])
+                if (same_filing and same_scope and unique_inputs
+                        and source["PDF page"].nunique() == 1 and denominator != 0):
+                    amount = 100 * abs(lookup["CSM_RELEASE"]) / denominator
+            elif label == "New business CSM / CSM release":
+                source = numeric[numeric["Metric code"].isin(required)]
+                same_filing = "Document ID" not in source or source["Document ID"].nunique() == 1
+                same_scope = "Scope" not in source or source["Scope"].nunique() == 1
+                unique_inputs = len(source) == len(required) and source["Metric code"].nunique() == len(required)
+                if (same_filing and same_scope and unique_inputs
+                        and source["PDF page"].nunique() == 1 and lookup["CSM_RELEASE"] != 0):
+                    amount = abs(lookup["CSM_NEW"]) / abs(lookup["CSM_RELEASE"])
             elif label == "New profitable contract CSM / PV inflows" and lookup["NB_INS_PROFIT_PV_IN"] != 0:
                 amount = 100 * abs(lookup["NB_INS_PROFIT_CSM"]) / abs(lookup["NB_INS_PROFIT_PV_IN"])
             elif label == "Insurance CSM / matching fulfilment cash flows":
@@ -888,7 +1004,12 @@ def analytical_ratio_rows(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
                 # note page; unrelated CSM and cash-flow populations are not
                 # combined merely because their metric codes are available.
                 denominator = lookup["INS_NONPAA_PVFCF_CLOSE"] + lookup["INS_NONPAA_RA_CLOSE"]
-                if source["PDF page"].nunique() == 1 and denominator != 0:
+                same_filing = ("Document ID" not in source or
+                               source["Document ID"].nunique() == 1)
+                same_scope = "Scope" not in source or source["Scope"].nunique() == 1
+                unique_inputs = len(source) == len(required) and source["Metric code"].nunique() == len(required)
+                if (same_filing and same_scope and unique_inputs
+                        and source["PDF page"].nunique() == 1 and denominator != 0):
                     amount = 100 * abs(lookup["INS_NONPAA_CSM_CLOSE"]) / abs(denominator)
             elif label == "Investment yield":
                 amount = lookup["INV_YIELD"]
@@ -898,9 +1019,159 @@ def analytical_ratio_rows(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
                 gaps.append({"Period": str(period), "Ratio": label, "Status": "Missing inputs",
                              "Detail": "Denominator, tax sign or source basis is unsuitable"})
                 continue
-            values.append({"Period": str(period), "Metric": label, "Amount": float(amount),
-                           "Source": "Derived within one filing from " + " / ".join(required)})
+            row = {"Period": str(period), "Metric": label, "Amount": float(amount),
+                   "Source": "Derived within one filing from " + " / ".join(required)}
+            if label == "New business CSM / CSM release":
+                row["Compared with 1×"] = "Above 1×" if amount > 1 else "Below 1×" if amount < 1 else "Equal to 1×"
+            values.append(row)
     return pd.DataFrame(values), pd.DataFrame(gaps)
+
+
+CSM_TREND_RATIO_LABELS = ("CSM amortization ratio", "New business CSM / CSM release")
+CSM_TREND_DISPLAY_LABELS = ("CSM amortization ratio", "CSM replenishment ratio")
+
+
+def csm_ratio_trend_chart(
+    frame: pd.DataFrame, companies: list[str], periods: list[str], *,
+    tracked_company: str | None = None, decimals: int = 2,
+    transparent: bool = True, show_labels: bool = True,
+) -> tuple[alt.TopLevelMixin | None, pd.DataFrame, pd.DataFrame]:
+    """Two company-colored CSM trend panels using matching note-page inputs."""
+    selected = frame.loc[
+        frame["Company"].isin(companies)
+        & frame["Period end"].astype(str).isin(periods)
+        & frame["Metric code"].isin(("CSM_CLOSE", "CSM_NEW", "CSM_RELEASE"))
+    ] if not frame.empty else frame
+    if selected.empty:
+        return None, pd.DataFrame(), pd.DataFrame()
+    group_keys = [column for column in
+                  ("Company", "Document ID", "Scope", "Period end", "Currency")
+                  if column in selected]
+    output = []
+    missing = []
+    for _, group in selected.groupby(group_keys, sort=False, dropna=False):
+        company = str(group["Company"].iloc[0])
+        scope = str(group["Scope"].iloc[0]) if "Scope" in group else ""
+        currency = str(group["Currency"].iloc[0]) if "Currency" in group else ""
+        values, gaps = analytical_ratio_rows(group)
+        if not gaps.empty:
+            gaps = gaps.loc[gaps["Ratio"].isin(CSM_TREND_RATIO_LABELS)].copy()
+            if not gaps.empty:
+                gaps["Company"] = company
+                missing.append(gaps)
+        if values.empty:
+            continue
+        values = values.loc[values["Metric"].isin(CSM_TREND_RATIO_LABELS)].copy()
+        if values.empty:
+            continue
+        amounts = dict(zip(group["Metric code"], pd.to_numeric(
+            group["Value (millions)"], errors="coerce")))
+        release = abs(amounts.get("CSM_RELEASE", float("nan")))
+        close = abs(amounts.get("CSM_CLOSE", float("nan")))
+        new_business = abs(amounts.get("CSM_NEW", float("nan")))
+        values["Company"] = company
+        values["Insurer"] = _company_scope_label(company, scope)
+        values["Scope"] = scope
+        values["Currency"] = currency
+        values["Period label"] = values["Period"].map(period_label)
+        values["Display metric"] = values["Metric"].replace({
+            CSM_TREND_RATIO_LABELS[1]: CSM_TREND_DISPLAY_LABELS[1],
+        })
+        values["Value (%)"] = values["Amount"]
+        replenishment = values["Metric"].eq(CSM_TREND_RATIO_LABELS[1])
+        values.loc[replenishment, "Value (%)"] *= 100
+        values["Numerator (millions)"] = release
+        values["Denominator (millions)"] = close + release
+        values.loc[replenishment, "Numerator (millions)"] = new_business
+        values.loc[replenishment, "Denominator (millions)"] = release
+        values["Comparison"] = "Annual CSM release / CSM before release"
+        values.loc[replenishment, "Comparison"] = values.loc[
+            replenishment, "Value (%)"].map(
+                lambda value: "Above 100%" if value > 100 else
+                "Below 100%" if value < 100 else "Equal to 100%")
+        output.append(values)
+    gaps = pd.concat(missing, ignore_index=True) if missing else pd.DataFrame()
+    if not output:
+        return None, gaps, pd.DataFrame()
+    rows = pd.concat(output, ignore_index=True)
+    shown_periods = [period for period in sorted(set(periods))
+                     if period in set(rows["Period"])]
+    period_order = [period_label(period) for period in shown_periods]
+    insurer_order = list(dict.fromkeys(
+        label for company in companies
+        for label in rows.loc[rows["Company"].eq(company), "Insurer"]
+    ))
+    palette = ("#C81728", COBALT, "#FD72BD", GREEN, PURPLE, CYAN, BLUE)
+    color_scale = alt.Scale(
+        domain=insurer_order,
+        range=[palette[index % len(palette)] for index in range(len(insurer_order))],
+    )
+    color = alt.Color(
+        "Insurer:N", scale=color_scale,
+        legend=alt.Legend(title=None, orient="top", direction="horizontal",
+                          symbolType="circle", symbolStrokeWidth=0, labelLimit=240),
+    )
+    no_legend_color = alt.Color("Insurer:N", scale=color_scale, legend=None)
+    rows["Value label"] = rows["Value (%)"].map(
+        lambda value: f"{value:,.{decimals}f}%" if show_labels else ""
+    )
+    if show_labels:
+        for metric, panel in rows.groupby("Display metric", sort=False):
+            values = panel["Value (%)"]
+            low = min(float(values.min()), 100.0) if metric == CSM_TREND_DISPLAY_LABELS[1] else float(values.min())
+            high = float(values.max())
+            minimum_gap = max(high - low, 1.0) * 16 / 300
+            for _, year_points in panel.groupby("Period", sort=False):
+                priority = year_points.assign(
+                    tracked=year_points["Company"].eq(tracked_company).astype(int),
+                ).sort_values(["tracked", "Value (%)"], ascending=[False, False])
+                kept: list[float] = []
+                for index, point in priority.iterrows():
+                    value = float(point["Value (%)"])
+                    if any(abs(value - previous) < minimum_gap for previous in kept):
+                        rows.at[index, "Value label"] = ""
+                    else:
+                        kept.append(value)
+    rows["Reference"] = 100.0
+    x = alt.X("Period label:N", sort=period_order, title=None,
+              axis=alt.Axis(labelAngle=0, labelLimit=95))
+    y = alt.Y("Value (%):Q", title="Percent (%)", scale=alt.Scale(zero=False),
+              axis=alt.Axis(format=".0f"))
+    opacity = (alt.condition(alt.datum.Company == tracked_company,
+                             alt.value(1), alt.value(0.28))
+               if tracked_company else alt.value(1))
+    tooltip = [alt.Tooltip("Insurer:N"), alt.Tooltip("Period label:N", title="Period"),
+               alt.Tooltip("Value (%):Q", title="Ratio (%)", format=".2f"),
+               alt.Tooltip("Numerator (millions):Q", format=",.2f"),
+               alt.Tooltip("Denominator (millions):Q", format=",.2f"),
+               alt.Tooltip("Currency:N"), alt.Tooltip("Comparison:N")]
+    base = alt.Chart(rows)
+    reference = base.transform_filter(
+        alt.datum["Display metric"] == CSM_TREND_DISPLAY_LABELS[1]
+    ).mark_rule(color=KPMG_INK, strokeDash=[5, 4], strokeWidth=1.3,
+                tooltip=False).encode(y=alt.Y("Reference:Q", title=None))
+    lines = base.mark_line(strokeWidth=2.5, strokeDash=[5, 4]).encode(
+        x=x, y=y, color=color, opacity=opacity, tooltip=tooltip,
+    )
+    points = base.mark_circle(size=80).encode(
+        x=x, y=y, color=no_legend_color, opacity=opacity, tooltip=tooltip,
+    )
+    layers = [reference, lines, points]
+    if show_labels:
+        labels = base.mark_text(fontSize=10, fontWeight="bold", dy=-11,
+                                tooltip=False).encode(
+            x=x, y=y, text="Value label:N", color=no_legend_color,
+            opacity=opacity,
+        )
+        layers.append(labels)
+    chart = alt.layer(*layers).properties(width=470, height=300).facet(
+        facet=alt.Facet("Display metric:N", sort=list(CSM_TREND_DISPLAY_LABELS),
+                        title=None,
+                        header=alt.Header(labelFontSize=13, labelFontWeight="bold",
+                                          labelColor=KPMG_INK)),
+        columns=2, spacing=25,
+    ).resolve_scale(y="independent")
+    return _report_chart_theme(chart, transparent=transparent), gaps, rows
 
 
 def analytical_ratio_bars(frame: pd.DataFrame) -> tuple[alt.TopLevelMixin | None, pd.DataFrame]:
@@ -936,7 +1207,7 @@ def financial_performance_trends(
     line = base.mark_line(color=COBALT, strokeWidth=2).encode(x=x, y=y)
     points = base.mark_circle(color=COBALT, size=95).encode(
         x=x, y=y,
-        tooltip=["Period:N", "Metric:N", alt.Tooltip("Amount:Q", title="Ratio (%)", format=".2f"), "Source:N"],
+        tooltip=["Period:N", alt.Tooltip("Amount:Q", title="Ratio (%)", format=".2f")],
     )
     numbers = base.mark_text(color=KPMG_INK, dy=-12, fontSize=10).encode(
         x=x, y=y, text="Value label:N",
@@ -1018,8 +1289,8 @@ def financial_performance_peer_dots(
             ),
             legend=alt.Legend(title=None, orient="bottom"),
         ),
-        tooltip=["Company:N", "Scope:N", "Period:N", "Metric:N",
-                 alt.Tooltip("Amount:Q", title="Ratio (%)", format=".2f"), "Source:N"],
+        tooltip=["Company:N", "Scope:N", "Period:N",
+                 alt.Tooltip("Amount:Q", title="Ratio (%)", format=".2f")],
     )
     layers.append(dots)
     chart = alt.layer(*layers).properties(
@@ -1035,7 +1306,8 @@ def financial_performance_peer_dots(
 
 def ratio_module_period_bars(frame: pd.DataFrame, labels: list[str], *,
                              color_by_period: bool = False,
-                             show_labels: bool = True) -> tuple[alt.TopLevelMixin | None, pd.DataFrame]:
+                             show_labels: bool = True,
+                             reference_line: float | None = None) -> tuple[alt.TopLevelMixin | None, pd.DataFrame]:
     values, gaps = analytical_ratio_rows(frame)
     selected_gaps = gaps[gaps["Ratio"].isin(labels)].copy() if not gaps.empty else gaps
     if values.empty:
@@ -1044,15 +1316,18 @@ def ratio_module_period_bars(frame: pd.DataFrame, labels: list[str], *,
     if values.empty:
         return None, selected_gaps
     chart = _grouped_period_bars(values, labels, periods=sorted(values["Period"].unique()),
-                                 unit_title="Ratio (%)", color_by_period=color_by_period,
-                                 show_labels=show_labels)
+                                 unit_title="Times (×)" if reference_line is not None else "Ratio (%)",
+                                 color_by_period=color_by_period, show_labels=show_labels,
+                                 decimals=2 if reference_line is not None else 1,
+                                 reference_line=reference_line)
     return chart, selected_gaps
 
 
 def peer_ratio_module_panels(frame: pd.DataFrame, labels: list[str], *, companies: list[str],
                              periods: list[str], show_labels: bool = True, decimals: int = 1,
                              transparent: bool = True,
-                             color_by_period: bool = False) -> tuple[alt.TopLevelMixin | None, pd.DataFrame]:
+                             color_by_period: bool = False,
+                             reference_line: float | None = None) -> tuple[alt.TopLevelMixin | None, pd.DataFrame]:
     output = []
     missing = []
     for company in companies:
@@ -1078,9 +1353,11 @@ def peer_ratio_module_panels(frame: pd.DataFrame, labels: list[str], *, companie
     ratio_rows = pd.concat(output, ignore_index=True)
     order = [company for company in companies if company in set(ratio_rows["Company"])]
     return _grouped_period_bars(
-        ratio_rows, labels, periods=periods, unit_title="Ratio (%)",
+        ratio_rows, labels, periods=periods,
+        unit_title="Times (×)" if reference_line is not None else "Ratio (%)",
         company_order=order, show_labels=show_labels, decimals=decimals,
         transparent=transparent, color_by_period=color_by_period,
+        reference_line=reference_line,
     ), gap_frame
 
 
@@ -1154,11 +1431,20 @@ def peer_group_panels(frame: pd.DataFrame, codes: list[str], *, companies: list[
                       reported_labels: dict[str, str] | None = None,
                       display_label: str | None = None,
                       alternative_metric_labels: bool = False,
-                      expense_mode: str | None = None) -> tuple[alt.TopLevelMixin | None, list[str]]:
+                      expense_mode: str | None = None,
+                      show_small_percent_labels: bool = False,
+                      metric_labels: dict[str, str] | None = None,
+                      metric_colors: dict[str, str] | None = None,
+                      white_label_metric: str | None = None,
+                      absolute_share_labels: bool = False,
+                      minimum_percent_label: float = 10,
+                      ) -> tuple[alt.TopLevelMixin | None, list[str]]:
     """One period-by-indicator chart per insurer; keep currencies explicit."""
     rows = _use_reported_company_labels(figure_rows(frame, codes), reported_labels)
     if rows.empty:
         return None, []
+    if metric_labels:
+        rows["Metric"] = rows["Metric code"].map(metric_labels).fillna(rows["Metric"])
     rows = rows[rows["Company"].isin(companies) & rows["Period"].isin(periods)].copy()
     if rows.empty:
         return None, []
@@ -1177,12 +1463,169 @@ def peer_group_panels(frame: pd.DataFrame, codes: list[str], *, companies: list[
         "HKD" if display_mode == "HKD converted" else str(frame.loc[frame["Company"].eq(company), "Currency"].iloc[0]))
         for company in companies if company in set(rows["Company"].str.split(" · ").str[0])]
     chart = _grouped_period_bars(
-        rows, (list(dict.fromkeys(rows["Metric"])) if reported_labels or display_label else
+        rows, (list(dict.fromkeys(rows["Metric"])) if reported_labels or display_label or metric_labels else
                [METRIC_BY_CODE[code].label for code in codes]), periods=periods,
         unit_title=f"{'HKD' if display_mode == 'HKD converted' else 'Original currency'} {unit}",
         company_order=panel_order, show_labels=show_labels, decimals=decimals,
         transparent=transparent, stacked=stacked, color_by_period=color_by_period,
+        show_small_percent_labels=show_small_percent_labels,
         alternative_metric_labels=alternative_metric_labels,
+        shared_y=display_mode == "HKD converted",
+        metric_colors=metric_colors, white_label_metric=white_label_metric,
+        absolute_share_labels=absolute_share_labels,
+        minimum_percent_label=minimum_percent_label,
+    )
+    return chart, excluded
+
+
+def service_result_period_bars(rows: pd.DataFrame) -> alt.TopLevelMixin | None:
+    """Stack a reconciled five-item result bridge for one insurer."""
+    from .service_result import SERVICE_RESULT_COMPONENTS
+
+    if rows.empty:
+        return None
+    component_colors = {
+        SERVICE_RESULT_COMPONENTS[3]: COBALT,
+        SERVICE_RESULT_COMPONENTS[4]: "#D9DEE7",
+    }
+    return _grouped_period_bars(
+        rows, list(SERVICE_RESULT_COMPONENTS),
+        periods=sorted(rows["Period"].unique()),
+        unit_title=f"{rows['Currency'].iloc[0]} millions", stacked=True,
+        metric_colors=component_colors, minimum_percent_label=5,
+        white_label_metric=SERVICE_RESULT_COMPONENTS[3],
+    )
+
+
+def peer_service_result_panels(
+    rows: pd.DataFrame, *, companies: list[str], periods: list[str],
+    display_mode: str = "Native currencies", unit: str = "millions",
+    show_labels: bool = True, decimals: int = 1,
+    transparent: bool = True,
+) -> tuple[alt.TopLevelMixin | None, list[str]]:
+    """Display the same reconciled bridge in peer panels and selected units."""
+    from .service_result import SERVICE_RESULT_COMPONENTS
+
+    rows = rows.loc[
+        rows["Company"].isin(companies) & rows["Period"].isin(periods)
+    ].copy()
+    if rows.empty:
+        return None, []
+    excluded: list[str] = []
+    if display_mode == "HKD converted":
+        rows, excluded = _convert_peer_amounts(rows)
+        if not rows.empty:
+            rows["Reported total"] *= rows["USD/HKD rate"].fillna(1.0)
+    if rows.empty:
+        return None, excluded
+    if unit == "billions":
+        rows["Amount"] /= 1000
+        rows["Reported total"] /= 1000
+    rows["Company"] = rows["Company"] + " · " + rows["Currency"]
+    panel_order = [company + " · " + (
+        "HKD" if display_mode == "HKD converted" else
+        str(rows.loc[rows["Company"].str.startswith(company + " · "), "Currency"].iloc[0])
+    ) for company in companies if rows["Company"].str.startswith(company + " · ").any()]
+    component_colors = {
+        SERVICE_RESULT_COMPONENTS[3]: COBALT,
+        SERVICE_RESULT_COMPONENTS[4]: "#D9DEE7",
+    }
+    chart = _grouped_period_bars(
+        rows, list(SERVICE_RESULT_COMPONENTS), periods=periods,
+        unit_title=f"{'HKD' if display_mode == 'HKD converted' else 'Original currency'} {unit}",
+        company_order=panel_order, show_labels=show_labels,
+        decimals=decimals, transparent=transparent, stacked=True,
+        shared_y=display_mode == "HKD converted",
+        metric_colors=component_colors, minimum_percent_label=5,
+        white_label_metric=SERVICE_RESULT_COMPONENTS[3],
+    )
+    return chart, excluded
+
+
+def investment_note_period_bars(rows: pd.DataFrame) -> alt.TopLevelMixin | None:
+    """Total bar or signed component stack from a reconciled investment note."""
+    from .investment_note import (
+        RESULT_COMPONENTS, RESULT_REPRESENTATION, RETURN_COMPONENTS, TOTAL_LABELS,
+    )
+
+    if rows.empty:
+        return None
+    view = str(rows["View"].iloc[0])
+    order = {
+        "return_total": (TOTAL_LABELS["return_total"],),
+        "return_components": RETURN_COMPONENTS,
+        "result_total": (TOTAL_LABELS["result_total"],),
+        "result_components": RESULT_COMPONENTS,
+        "result_representation": RESULT_REPRESENTATION,
+        "return_pl_total": (TOTAL_LABELS["return_pl_total"],),
+        "return_pl_components": RETURN_COMPONENTS[:3],
+        "finance_pl_total": (TOTAL_LABELS["finance_pl_total"],),
+        "result_pl_total": (TOTAL_LABELS["result_pl_total"],),
+        "result_pl_components": RESULT_COMPONENTS,
+    }[view]
+    stacked = view not in {"return_total", "result_total", "return_pl_total",
+                           "finance_pl_total", "result_pl_total"}
+    return _grouped_period_bars(
+        rows, list(order), periods=sorted(rows["Period"].unique()),
+        unit_title=f"{rows['Currency'].iloc[0]} millions",
+        stacked=stacked, color_by_period=not stacked,
+        minimum_percent_label=5,
+    )
+
+
+def peer_investment_note_panels(
+    rows: pd.DataFrame, *, companies: list[str], periods: list[str],
+    display_mode: str = "Native currencies", unit: str = "millions",
+    show_labels: bool = True, decimals: int = 1,
+    transparent: bool = True,
+) -> tuple[alt.TopLevelMixin | None, list[str]]:
+    """Peer total bars and note component stacks with explicit units."""
+    from .investment_note import (
+        RESULT_COMPONENTS, RESULT_REPRESENTATION, RETURN_COMPONENTS, TOTAL_LABELS,
+    )
+
+    rows = rows.loc[
+        rows["Company"].isin(companies) & rows["Period"].isin(periods)
+    ].copy()
+    if rows.empty:
+        return None, []
+    view = str(rows["View"].iloc[0])
+    order = {
+        "return_total": (TOTAL_LABELS["return_total"],),
+        "return_components": RETURN_COMPONENTS,
+        "result_total": (TOTAL_LABELS["result_total"],),
+        "result_components": RESULT_COMPONENTS,
+        "result_representation": RESULT_REPRESENTATION,
+        "return_pl_total": (TOTAL_LABELS["return_pl_total"],),
+        "return_pl_components": RETURN_COMPONENTS[:3],
+        "finance_pl_total": (TOTAL_LABELS["finance_pl_total"],),
+        "result_pl_total": (TOTAL_LABELS["result_pl_total"],),
+        "result_pl_components": RESULT_COMPONENTS,
+    }[view]
+    stacked = view not in {"return_total", "result_total", "return_pl_total",
+                           "finance_pl_total", "result_pl_total"}
+    excluded: list[str] = []
+    if display_mode == "HKD converted":
+        rows, excluded = _convert_peer_amounts(rows)
+        if not rows.empty:
+            rows["Reported total"] *= rows["USD/HKD rate"].fillna(1.0)
+    if rows.empty:
+        return None, excluded
+    if unit == "billions":
+        rows["Amount"] /= 1000
+        rows["Reported total"] /= 1000
+    rows["Company"] = rows["Company"] + " · " + rows["Currency"]
+    panel_order = [company + " · " + (
+        "HKD" if display_mode == "HKD converted" else
+        str(rows.loc[rows["Company"].str.startswith(company + " · "), "Currency"].iloc[0])
+    ) for company in companies if rows["Company"].str.startswith(company + " · ").any()]
+    chart = _grouped_period_bars(
+        rows, list(order), periods=periods,
+        unit_title=f"{'HKD' if display_mode == 'HKD converted' else 'Original currency'} {unit}",
+        company_order=panel_order, show_labels=show_labels,
+        decimals=decimals, transparent=transparent, stacked=stacked,
+        color_by_period=not stacked,
+        minimum_percent_label=5,
         shared_y=display_mode == "HKD converted",
     )
     return chart, excluded
@@ -1191,6 +1634,7 @@ def peer_group_panels(frame: pd.DataFrame, codes: list[str], *, companies: list[
 def company_year_comparison_bars(
     frame: pd.DataFrame, codes: list[str], *, companies: list[str],
     periods: list[str], display_mode: str = "Native currencies",
+    tracked_company: str | None = None,
     unit: str = "millions", show_labels: bool = True,
     decimals: int = 1, transparent: bool = True,
     label_font_size: int = 11, bar_width: int = 36,
@@ -1198,6 +1642,7 @@ def company_year_comparison_bars(
     reported_labels: dict[str, str] | None = None,
     ratio_label: str | None = None,
     expense_mode: str | None = None,
+    yearly_mean_lines: bool = False,
 ) -> tuple[alt.TopLevelMixin | None, list[str], str]:
     """Pair the latest two year ends for each insurer with a signed YoY callout."""
     selected_periods = sorted({str(period) for period in periods})[-2:]
@@ -1249,13 +1694,16 @@ def company_year_comparison_bars(
         _company_scope_label(name, scope)
         for name, scope in zip(rows["Company"], rows["Scope"])
     ]
+    highlight_company = tracked_company if tracked_company in set(rows["Company"]) else None
+    rows["Tracked"] = rows["Company"].eq(highlight_company) if highlight_company else True
     company_order = list(dict.fromkeys(
         label for company in companies
         for label in rows.loc[rows["Company"].eq(company), "Company label"]
     ))
     display_periods = [period_label(period) for period in selected_periods]
-    colors = [YEAR_COLORS.get(period, KPMG_BRIGHT_CHART_COLORS[index % len(KPMG_BRIGHT_CHART_COLORS)])
-              for index, period in enumerate(display_periods)]
+    colors = (["#C7A0F7", "#1E49E2"] if yearly_mean_lines and len(display_periods) == 2
+              else [YEAR_COLORS.get(period, KPMG_BRIGHT_CHART_COLORS[index % len(KPMG_BRIGHT_CHART_COLORS)])
+                    for index, period in enumerate(display_periods)])
     suffix = "%" if ratio_label is not None else ""
     rows["Value label"] = rows["Amount"].map(
         lambda value: f"{value:,.{decimals}f}{suffix}"
@@ -1278,6 +1726,7 @@ def company_year_comparison_bars(
             arrow = "↗" if change > 0 else "↘" if change < 0 else "→"
             changes.append({
                 "Company label": label, "Currency": currency,
+                "Tracked": bool(group["Tracked"].iloc[0]),
                 "Comparison Y": max(0.0, previous, current) + padding,
                 "Change pct": change,
                 "Change label": f"{arrow} {abs(change):.1f}%",
@@ -1290,6 +1739,14 @@ def company_year_comparison_bars(
         summary = (f"{display_periods[-1]} vs {display_periods[0]}: "
                    f"{positive} increased, {negative} decreased. "
                    "Change uses (current − prior) / |prior|; zero or missing prior values have no percentage.")
+    if yearly_mean_lines:
+        mean_parts = []
+        for year_label, group in rows.groupby("Period label", sort=False):
+            count = group["Company"].nunique()
+            if count >= 2:
+                mean_parts.append(f"{year_label}: {group['Amount'].mean():.2f}% (n={count})")
+        summary = ("Equal-weight mean of displayed insurers with available matching ratios: "
+                   + "; ".join(mean_parts) + ".") if mean_parts else ""
 
     def panel(panel_rows: pd.DataFrame, panel_changes: pd.DataFrame,
               panel_currency: str, width: int | str) -> alt.LayerChart:
@@ -1314,9 +1771,9 @@ def company_year_comparison_bars(
             legend=alt.Legend(orient="top", direction="horizontal", title=None,
                               labelLimit=1000, columns=len(display_periods)),
         )
-        tooltip = ["Company label:N", "Period label:N", "Metric:N",
+        tooltip = ["Company label:N", "Period label:N",
                    alt.Tooltip("Amount:Q", format=",.3f", title=y_title),
-                   "Currency:N", "Source:N"]
+                   "Currency:N"]
         if "Accounting signed amount" in panel_rows:
             tooltip.append(alt.Tooltip("Accounting signed amount:Q", format=",.3f",
                                        title="Signed amount (chart unit)"))
@@ -1324,13 +1781,16 @@ def company_year_comparison_bars(
             tooltip.extend([alt.Tooltip("USD/HKD rate:Q", format=".4f"), "FX rate date:N"])
         if "Original source amount (millions)" in panel_rows:
             tooltip.extend([
-                alt.Tooltip("Original source amount (millions):Q", format=",.3f"),
-                "Original source currency:N",
+                alt.Tooltip("Original source amount (millions):Q", title="Original amount (millions)", format=",.3f"),
+                alt.Tooltip("Original source currency:N", title="Original currency"),
             ])
-        bars = alt.Chart(panel_rows).mark_bar(
-            width=alt.RelativeBandSize(1), opacity=0.96,
-        ).encode(
-            x=x, xOffset=x_offset, y=y, color=color, tooltip=tooltip,
+        bar_opacity = (alt.condition(alt.datum.Tracked, alt.value(0.96), alt.value(0.24))
+                       if highlight_company else alt.value(0.96))
+        label_opacity = (alt.condition(alt.datum.Tracked, alt.value(1), alt.value(0.40))
+                         if highlight_company else alt.value(1))
+        bars = alt.Chart(panel_rows).mark_bar(width=alt.RelativeBandSize(1)).encode(
+            x=x, xOffset=x_offset, y=y, color=color, opacity=bar_opacity,
+            tooltip=tooltip,
         )
         layers = [bars]
         if show_labels:
@@ -1343,8 +1803,8 @@ def company_year_comparison_bars(
                         dy=offset, fontSize=label_font_size,
                         fontWeight="bold", color=KPMG_INK,
                     ).encode(x=x, xOffset=x_offset, y=alt.Y("Amount:Q", title=None),
-                             text="Value label:N"))
-            if not panel_changes.empty:
+                             text="Value label:N", opacity=label_opacity))
+            if not panel_changes.empty and not yearly_mean_lines:
                 layers.append(alt.Chart(panel_changes).mark_text(
                     fontSize=label_font_size + 1,
                     fontWeight="bold", baseline="bottom", dy=-3,
@@ -1352,8 +1812,47 @@ def company_year_comparison_bars(
                     x=x, y=alt.Y("Comparison Y:Q", title=None), text="Change label:N",
                     color=alt.condition(alt.datum["Change pct"] >= 0,
                                         alt.value(PINK), alt.value(GREEN)),
+                    opacity=label_opacity,
                     tooltip=["Company label:N", alt.Tooltip("Change pct:Q", format="+.1f")],
                 ))
+        if yearly_mean_lines:
+            means = (panel_rows.groupby("Period label", sort=False)
+                     .agg(Mean=("Amount", "mean"), Insurers=("Company", "nunique"))
+                     .reset_index())
+            means = means.loc[means["Insurers"].ge(2)].copy()
+            if not means.empty:
+                means["Company label"] = panel_order[-1]
+                means["Mean label"] = means.apply(
+                    lambda row: f"{row['Period label']} mean: {row['Mean']:.{max(2, decimals)}f}%",
+                    axis=1,
+                )
+                line_colors = (["#7213EA", "#00338D"] if len(display_periods) == 2
+                               else colors)
+                mean_color = alt.Color(
+                    "Period label:N", scale=alt.Scale(domain=display_periods,
+                                                      range=line_colors),
+                    legend=None,
+                )
+                for index, year_label in enumerate(display_periods):
+                    year_means = means.loc[means["Period label"].eq(year_label)]
+                    if year_means.empty:
+                        continue
+                    layers.append(alt.Chart(year_means).mark_rule(
+                        strokeDash=[3, 5] if index == 0 else [9, 6], strokeWidth=2,
+                    ).encode(
+                        y=alt.Y("Mean:Q", title=None), color=mean_color,
+                        tooltip=["Period label:N",
+                                 alt.Tooltip("Mean:Q", format=".2f", title="Peer mean (%)"),
+                                 alt.Tooltip("Insurers:Q", title="Insurers in mean")],
+                    ))
+                    layers.append(alt.Chart(year_means).mark_text(
+                        align="right", baseline="middle", dy=-10 if index == 0 else 11,
+                        fontSize=10, fontWeight="bold",
+                    ).encode(
+                        x=alt.X("Company label:N", sort=panel_order, bandPosition=1),
+                        y=alt.Y("Mean:Q", title=None), text="Mean label:N",
+                        color=mean_color,
+                    ))
         return alt.layer(*layers).properties(height=420, width=width)
 
     currencies = list(dict.fromkeys(rows["Currency"].astype(str)))
@@ -1392,17 +1891,22 @@ def peer_revenue_stack_panels(frame: pd.DataFrame, codes: list[str], *,
         return None, excluded
     if unit == "billions":
         rows[["Amount", "Label midpoint"]] /= 1000
+    method_split = (require_all and denominator_code is None and
+                    set(codes) == {"REV_NONPAA_TOTAL", "REV_PAA_TOTAL"})
+    if method_split:
+        rows = _revenue_method_split_amounts(rows)
+    rows, labels = _revenue_stack_display(rows, codes, denominator_code)
     rows["Company"] = rows["Company"] + " · " + rows["Currency"]
     panel_order = [company + " · " + (
         "HKD" if display_mode == "HKD converted" else
         str(frame.loc[frame["Company"].eq(company), "Currency"].iloc[0]))
         for company in companies if company in set(rows["Company"].str.split(" · ").str[0])]
     chart = _grouped_period_bars(
-        rows, [METRIC_BY_CODE[code].label for code in codes], periods=periods,
+        rows, labels, periods=periods,
         unit_title=f"{'HKD' if display_mode == 'HKD converted' else 'Original currency'} {unit}",
         company_order=panel_order, show_labels=True, transparent=transparent,
-        stacked=True, percentage_labels=True,
-        shared_y=display_mode == "HKD converted",
+        stacked=True, percentage_labels=True, normalized_share=method_split,
+        shared_y=method_split or display_mode == "HKD converted",
     )
     return chart, excluded
 
@@ -1460,7 +1964,7 @@ def component_bars(frame: pd.DataFrame, period_end: str, codes: list[str]) -> al
         .encode(y=alt.Y("Metric:N", sort=order, title=None),
                 x=alt.X("Value (millions):Q", title=f"{rows['Currency'].iloc[0]} millions"),
                 color=alt.Color("Direction:N", scale=alt.Scale(domain=["Positive", "Negative"], range=[BLUE, PINK]), legend=None),
-                tooltip=["Metric:N", alt.Tooltip("Value (millions):Q", format=",.2f"), "Source:N"])
+                tooltip=[alt.Tooltip("Value (millions):Q", format=",.2f")])
         .properties(height=max(300, 50 * rows["Metric code"].nunique()))
     )
 

@@ -19,7 +19,7 @@ from hkifrs17.metric_blueprint import CHART_REQUIREMENTS
 from hkifrs17.report_modules import (
     COMPANY_YEAR_COMPARISON_IDS, HOVER_ONLY_LABEL_MODULE_IDS, REPORT_MODULES,
     RATIO_MODULE_LABELS,
-    STACKED_AMOUNT_MODULE_IDS, TABLE_MODULE_IDS, YEAR_COLORED_MODULE_IDS,
+    STACKED_AMOUNT_MODULE_IDS, YEAR_COLORED_MODULE_IDS,
     module_rows, stacked_component_metrics,
 )
 
@@ -129,10 +129,16 @@ def test_revenue_method_split_is_stacked_with_full_legend_and_percentage_labels(
     bars = spec["layer"][0]["encoding"]
     labels = spec["layer"][1]["encoding"]
     assert bars["y"]["stack"] == "zero"
+    assert bars["y"]["field"] == "Share (%)"
+    assert bars["y"]["scale"]["domain"] == [0, 100]
     assert "xOffset" not in bars
     assert bars["color"]["legend"]["labelLimit"] == 1000
     assert bars["color"]["legend"]["columns"] == 1
     assert labels["text"]["field"] == "Percent label"
+    assert labels["y"]["field"] == "Share midpoint"
+    assert {item["field"] for item in bars["tooltip"] if isinstance(item, dict)} >= {
+        "Non-PAA amount", "PAA amount", "Share (%)",
+    }
     shares = _revenue_stack_rows(records, codes, denominator_code=None, require_all=True)
     assert shares.groupby("Period")["Share (%)"].sum().round(8).eq(100).all()
 
@@ -145,6 +151,12 @@ def test_non_paa_components_keep_signed_amounts_and_use_reported_total():
                                require_all=False)
     assert not rows.empty
     assert rows.groupby("Period")["Share (%)"].sum().round(8).eq(100).all()
+    insurer_spec = revenue_stack_bars(
+        records, list(codes), denominator_code="REV_NONPAA_TOTAL",
+    ).to_dict(validate=True)
+    insurer_labels = insurer_spec["layer"][0]["encoding"]["color"]["scale"]["domain"]
+    assert insurer_labels
+    assert all(not label.startswith("Revenue: ") for label in insurer_labels)
     chart, excluded = peer_revenue_stack_panels(
         records, list(codes), companies=["FWD Life Bermuda"],
         periods=["2024-12-31", "2025-12-31"], denominator_code="REV_NONPAA_TOTAL",
@@ -153,24 +165,111 @@ def test_non_paa_components_keep_signed_amounts_and_use_reported_total():
     spec = chart.to_dict(validate=True)
     assert spec["spec"]["layer"][0]["encoding"]["y"]["stack"] == "zero"
     assert spec["spec"]["layer"][1]["encoding"]["text"]["field"] == "Percent label"
+    peer_labels = spec["spec"]["layer"][0]["encoding"]["color"]["scale"]["domain"]
+    assert peer_labels == insurer_labels
 
 
-def test_hkd_revenue_stacks_share_y_scale_across_companies():
-    records = demo_records()
+def test_non_paa_expense_composition_stacks_amounts_with_whole_percent_labels():
+    workbook = (Path(__file__).resolve().parents[1] / "outputs" /
+                "HK_IFRS17_FWD_YF_SunLife_2024_2025_highlights_updated.xlsx")
+    records = pd.read_excel(workbook, sheet_name="Records")
+    module = next(item for item in REPORT_MODULES if item.module_id == "exp_1")
+    assert module.title == "Non-PAA insurance service expense composition"
+    assert module.module_id in STACKED_AMOUNT_MODULE_IDS
+    fwd = records[records["Company"].eq("FWD Life Bermuda")]
+    chart = period_bars(
+        fwd, list(module.metrics), stacked=True,
+        expense_mode="contribution", show_small_percent_labels=True,
+    )
+    spec = chart.to_dict(validate=True)
+    bars = spec["layer"][0]["encoding"]
+    labels = spec["layer"][1]["encoding"]
+    assert bars["y"]["field"] == "Amount"
+    assert bars["y"]["stack"] == "zero"
+    assert labels["text"]["field"] == "Percent label"
+    points = [point for dataset in spec["datasets"].values() for point in dataset
+              if point.get("Metric code") in module.metrics]
+    assert points
+    assert any(point["Percent label"] for point in points)
+    assert all(point["Percent label"].removesuffix("%").lstrip("-").isdigit()
+               for point in points if point["Percent label"])
+    shares = pd.DataFrame(points)
+    assert shares.groupby("Period")["Share (%)"].apply(
+        lambda values: values.abs().sum()
+    ).round(8).eq(100).all()
+
+    peer, excluded = peer_group_panels(
+        records, list(module.metrics), companies=["FWD Life Bermuda", "Sun Life Hong Kong"],
+        periods=["2024-12-31", "2025-12-31"], stacked=True,
+        expense_mode="contribution", show_small_percent_labels=True,
+    )
+    assert excluded == []
+    peer_spec = peer.to_dict(validate=True)
+    peer_bars = peer_spec["spec"]["layer"][0]["encoding"]
+    assert peer_bars["y"]["field"] == "Amount"
+    assert peer_bars["y"]["stack"] == "zero"
+    assert peer_spec["spec"]["layer"][1]["encoding"]["text"]["field"] == "Percent label"
+
+
+def test_hkd_revenue_method_split_has_equal_height_for_different_amounts():
+    records = demo_records("FWD_2025")
+    second = records.copy()
+    second["Company"] = "Second insurer"
+    second["Document ID"] = second["Document ID"].astype(str) + "_SECOND"
+    second.loc[second["Metric code"].isin(["REV_NONPAA_TOTAL", "REV_PAA_TOTAL"]),
+               "Value (millions)"] *= 2
+    records = pd.concat([records, second], ignore_index=True)
     chart, excluded = peer_revenue_stack_panels(
         records, ["REV_NONPAA_TOTAL", "REV_PAA_TOTAL"],
-        companies=["FWD Life Bermuda", "YF Life"],
+        companies=["FWD Life Bermuda", "Second insurer"],
         periods=["2024-12-31", "2025-12-31"],
-        require_all=True, display_mode="HKD converted", unit="billions",
+        require_all=True, display_mode="Native currencies", unit="billions",
     )
     assert excluded == []
     spec = chart.to_dict(validate=True)
     assert spec["resolve"]["scale"]["y"] == "shared"
-    assert spec["spec"]["layer"][0]["encoding"]["y"]["title"] == "HKD billions"
+    bars = spec["spec"]["layer"][0]["encoding"]
+    assert bars["y"]["field"] == "Share (%)"
+    assert bars["y"]["title"] == "Share (%)"
+    assert {item["field"] for item in bars["tooltip"] if isinstance(item, dict)} >= {
+        "Non-PAA amount", "PAA amount", "Share (%)",
+    }
+    points = [point for dataset in spec["datasets"].values() for point in dataset
+              if "Share (%)" in point]
+    shares = pd.DataFrame(points)
+    assert shares.groupby(["Company", "Period"])["Share (%)"].sum().round(8).eq(100).all()
+    assert shares.groupby("Company")["Non-PAA amount"].first().nunique() == 2
+
+
+def test_chart_hovers_omit_source_and_metric_fields():
+    records = demo_records("FWD_2025")
+    charts = [
+        period_bars(records, ["INS_REVENUE"]),
+        revenue_stack_bars(records, ["REV_NONPAA_TOTAL", "REV_PAA_TOTAL"], require_all=True),
+        peer_revenue_stack_panels(
+            records, ["REV_NONPAA_TOTAL", "REV_PAA_TOTAL"],
+            companies=["FWD Life Bermuda"], periods=["2024-12-31", "2025-12-31"],
+            require_all=True,
+        )[0],
+    ]
+
+    def hover_fields(value):
+        if isinstance(value, dict):
+            if isinstance(value.get("tooltip"), list):
+                yield from (item.get("field") for item in value["tooltip"]
+                            if isinstance(item, dict))
+            for child in value.values():
+                yield from hover_fields(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from hover_fields(child)
+
+    for chart in charts:
+        assert not {"Metric", "Source"}.intersection(hover_fields(chart.to_dict(validate=True)))
 
 
 @pytest.mark.parametrize("module_id", [
-    "prof_2025", "prof_2024", "uw_profit", "oci_deep",
+    "prof_2025", "prof_2024",
 ])
 def test_requested_component_charts_stack_signed_details_in_both_steps(module_id):
     workbook = (Path(__file__).resolve().parents[1] / "outputs" /
@@ -223,9 +322,9 @@ def test_requested_charts_use_blue_year_colors_without_changing_other_legends():
         "Insurance service result",
         "Other comprehensive income", "Total comprehensive income", "Total assets",
         "Insurance CSM closing balance", "CSM to matching fulfilment cash flows",
-        "New profitable insurance contract CSM", "Initial onerous-contract loss",
-        "New profitable contract CSM to PV inflows", "Risk adjustment confidence level",
-        "Insurance revenue detail", "Investment return", "Net investment result as reported",
+        "New profitable insurance contract CSM", "Initial loss component from new onerous business",
+        "Risk adjustment confidence level",
+        "Insurance revenue detail", "Investment return", "Net investment result",
         "Financial position", "CSM",
         "Reinsurance CSM release",
     }
@@ -438,12 +537,10 @@ def test_selected_financial_charts_group_years_by_company_without_changing_color
 
 
 @pytest.mark.parametrize("module_id", [
-    "csm_trans", "nb_struct", "asset_struct", "report_detail", "nbv_table",
+    "asset_struct",
 ])
 def test_selected_charts_keep_amounts_in_hover_only(module_id):
     assert module_id in HOVER_ONLY_LABEL_MODULE_IDS
-    if module_id in {"report_detail", "nbv_table"}:
-        assert module_id not in TABLE_MODULE_IDS
     workbook = (Path(__file__).resolve().parents[1] / "outputs" /
                 "HK_IFRS17_FWD_YF_SunLife_2024_2025_highlights_updated.xlsx")
     records = pd.read_excel(workbook, sheet_name="Records")

@@ -15,6 +15,18 @@ from .report_modules import ReportModule
 from .highlights import HIGHLIGHT_COLUMNS
 
 
+HIGHLIGHT_DISPLAY_LABELS = (
+    "Net Assets Growth (%)",
+    "Net Profit Growth (%)",
+    "CSM Growth (%)",
+    "New Business CSM Growth (%)",
+    "CSM Amortization Ratio (%)",
+    "CSM Replenishment Ratio (%)",
+    "Insurance Service Revenue Growth (%)",
+    "Net Insurance Contract Liabilities Growth (%)",
+)
+
+
 def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
@@ -52,13 +64,72 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
 .report-table tbody tr.tracked-company td:not(.unavailable) { background:rgba(0,51,141,.07); }
 .report-table tbody tr.tracked-company td:first-child { border-left:1.5px solid #00338D; }
 .report-table tbody tr.tracked-company td:last-child { border-right:1.5px solid #00338D; }
-.discount-rate-table { table-layout:fixed; font-size:clamp(10px,.9vw,13px); }
-.discount-rate-table th { text-align:center; }
-.discount-rate-table th:first-child { width:23%; text-align:left; }
-.discount-rate-table td { vertical-align:top; line-height:1.55; overflow-wrap:anywhere; }
+.discount-rate-company { margin:0 0 24px; }
+.discount-rate-company-title { color:#00338D; font:700 14px Arial,sans-serif; margin:0 0 7px; }
+.discount-rate-company.tracked-company { border-left:3px solid #00338D; padding-left:9px; }
+.discount-rate-wrap { width:100%; overflow-x:auto; }
+.discount-rate-table { table-layout:auto; min-width:850px; margin:0; font-size:clamp(10px,.9vw,13px); }
+.discount-rate-table th, .discount-rate-table td { text-align:center; vertical-align:middle; white-space:nowrap; }
+.discount-rate-table th:first-child, .discount-rate-table td:first-child,
+.discount-rate-table th:nth-child(2), .discount-rate-table td:nth-child(2) { text-align:left; white-space:normal; }
 .discount-rate-table td:first-child { font-weight:700; }
-.discount-rate-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
-.highlights-wrap { width:100%; max-width:100%; margin:12px 0 24px; }
+.discount-rate-table tbody.rate-year-pair { break-inside:avoid-page; page-break-inside:avoid; }
+.discount-rate-table td.unavailable, .confidence-level-table td.unavailable,
+.financial-performance-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
+.financial-performance-table { table-layout:fixed; }
+.financial-performance-table th:first-child { width:25%; }
+.financial-performance-table th:nth-child(2) { width:39%; }
+.financial-performance-table th:nth-child(n+3),
+.financial-performance-table td:nth-child(n+3) { text-align:center; }
+.financial-performance-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:18px 24px; align-items:start; }
+.financial-performance-card { min-width:0; break-inside:avoid-page; page-break-inside:avoid; }
+.financial-performance-card-title { color:#00338D; font:700 14px Arial,sans-serif; margin:0 0 7px; }
+.financial-performance-card .financial-performance-table { margin:0; }
+.financial-performance-card .financial-performance-table th:first-child { width:52%; }
+.financial-performance-card .financial-performance-table th:nth-child(n+2) { width:auto; }
+.financial-performance-card .financial-performance-table th:nth-child(n+2),
+.financial-performance-card .financial-performance-table td:nth-child(n+2) { text-align:center; }
+.csm-rollforward-table { table-layout:fixed; font-size:clamp(10px,.85vw,12px); }
+.csm-rollforward-table th, .csm-rollforward-table td { text-align:center; overflow-wrap:anywhere; }
+.csm-rollforward-table th:first-child, .csm-rollforward-table td:first-child { width:18%; text-align:left; }
+.csm-rollforward-table td:first-child { font-weight:700; }
+.csm-rollforward-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
+.equity-movement-meta { text-align:right; color:#56657E; font:11px Arial,sans-serif; margin:2px 0 4px; }
+.equity-movement-table { table-layout:fixed; font-size:clamp(10px,.85vw,12px); margin-top:0; }
+.equity-movement-table th, .equity-movement-table td { text-align:center; overflow-wrap:anywhere; }
+.equity-movement-table th:nth-child(2), .equity-movement-table td:nth-child(2) { text-align:left; width:20%; }
+.equity-movement-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
+.equity-movement-table td.tracked-column:not(.unavailable) { background:rgba(0,51,141,.07); color:#00338D; font-weight:700; }
+.oci-waterfall-key { display:grid; grid-template-columns:repeat(var(--oci-key-columns),minmax(0,1fr)); gap:16px; width:100%; margin:0; font:11px/1.28 Arial,sans-serif; color:#414A5B; }
+.oci-waterfall-key-card { min-width:0; padding:0 4px; }
+.oci-waterfall-key-title { color:#00338D; font-weight:700; margin-bottom:3px; }
+.oci-waterfall-key-item { margin:1px 0; }
+.oci-waterfall-key-number { display:inline-block; min-width:16px; color:#00338D; font-weight:700; }
+.oci-waterfall-key-bridge { color:#56657E; font-weight:600; margin:0 0 3px; }
+.oci-waterfall-key-note { color:#687384; margin-top:6px; font-size:10px; }
+.oci-waterfall-key-summary { grid-column:1/-1; color:#687384; font-size:10px; margin-top:1px; }
+@media screen and (max-width:800px) { .oci-waterfall-key { grid-template-columns:1fr; gap:12px; } }
+.oci-wide-table { table-layout:fixed; font-size:clamp(10px,.85vw,12px); }
+.oci-wide-table th:first-child, .oci-wide-table td:first-child { width:28%; text-align:left; font-weight:700; }
+.oci-wide-table th:not(:first-child), .oci-wide-table td:not(:first-child) { text-align:center; overflow-wrap:anywhere; }
+.oci-wide-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
+.oci-wide-table td.tracked-column:not(.unavailable) { background:rgba(0,51,141,.07); color:#00338D; font-weight:700; }
+.appendix-year { width:100%; margin:12px 0 24px; break-inside:avoid-page; page-break-inside:avoid; }
+.appendix-year-title { color:#00338D; font:700 14px Arial,sans-serif; margin:0 0 7px; }
+.appendix-year-heading { display:flex; justify-content:space-between; gap:12px; align-items:baseline; }
+.appendix-unit { color:#56657E; font:11px Arial,sans-serif; white-space:nowrap; }
+.appendix-table-wrap { width:100%; overflow-x:auto; }
+.appendix-table { table-layout:fixed; min-width:620px; margin:0; font-size:clamp(9px,.85vw,12px); }
+.appendix-table th, .appendix-table td { overflow-wrap:anywhere; vertical-align:middle; }
+.appendix-table th:first-child, .appendix-table td:first-child { width:34%; text-align:left; }
+.appendix-table th:not(:first-child), .appendix-table td:not(:first-child) { text-align:center; }
+.appendix-table tr.section td { background:#E7ECF3!important; color:#00338D; font-weight:700; }
+.appendix-table tr.subtotal td, .appendix-table tr.total td { font-weight:700; }
+.appendix-table tr.total td { border-top:2px solid #00338D; }
+.appendix-table td.unavailable { background:#CECECE!important; color:white; font-weight:700; }
+.appendix-table td.tracked-column:not(.unavailable) { background:rgba(0,51,141,.07); color:#00338D; font-weight:700; }
+.appendix-print-prefix { display:none; }
+.highlights-wrap { width:100%; max-width:100%; margin:12px 0 6px; }
 .highlights-table { width:100%; border-collapse:collapse; font:clamp(7px,.82vw,12px) Arial,sans-serif; table-layout:fixed; }
 .highlights-table th { background:#00338D; color:white; text-align:center; padding:clamp(3px,.6vw,10px) clamp(2px,.45vw,7px); border:1px solid white; line-height:1.3; font-weight:700; overflow-wrap:anywhere; }
 .highlights-table th:first-child { width:17%; text-align:left; }
@@ -182,6 +253,121 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
     padding:0!important; top:auto!important; overflow:visible!important;
     break-inside:auto!important; page-break-inside:auto!important;
   }
+  html body .st-key-report_section_heading_key-performance-indicators {
+    display:block!important; break-before:page!important; page-break-before:always!important;
+  }
+  html body .st-key-report_section_heading_appendix {
+    display:none!important;
+  }
+  html body .st-key-report_chart_report_detail {
+    break-before:page!important; page-break-before:always!important;
+  }
+  .appendix-print-prefix { display:inline!important; }
+  html body .st-key-report_chart_report_detail .st-key-report_visual_report_detail {
+    display:block!important; height:auto!important; min-height:0!important;
+    padding:0!important; top:auto!important; overflow:visible!important;
+    break-inside:auto!important; page-break-inside:auto!important;
+  }
+  html body .st-key-report_chart_six_dimensional_charts,
+  html body .st-key-report_chart_six_dimensional_charts .st-key-report_table_six_dimensional_charts {
+    display:block!important; height:auto!important; min-height:0!important;
+    padding:0!important; overflow:visible!important;
+    break-before:auto!important; page-break-before:auto!important;
+    break-inside:auto!important; page-break-inside:auto!important;
+  }
+  html body .st-key-report_chart_six_dimensional_charts .financial-performance-grid {
+    display:block!important;
+  }
+  html body .st-key-report_chart_six_dimensional_charts .financial-performance-card {
+    display:block!important; margin:0 0 8mm!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_section_heading_key-performance-indicators {
+    break-after:avoid-page!important; page-break-after:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_section_heading_key-performance-indicators h2 {
+    margin:0 0 3mm!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_six_dimensional_charts,
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_six_dimensional_charts .st-key-report_visual_six_dimensional_charts,
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_six_dimensional_charts .st-key-report_table_six_dimensional_charts {
+    display:block!important; height:auto!important; min-height:0!important;
+    position:static!important; top:auto!important; overflow:visible!important;
+    break-before:auto!important; page-break-before:auto!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_six_dimensional_charts .st-key-report_table_six_dimensional_charts h4 {
+    margin:0 0 4mm!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_six_dimensional_charts .financial-performance-grid {
+    display:grid!important; grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:5mm 6mm!important; align-items:start!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_six_dimensional_charts .financial-performance-card {
+    margin:0!important;
+  }
+  html body .st-key-report_chart_csm_comp_lat .st-key-report_visual_csm_comp_lat {
+    display:block!important; height:auto!important; min-height:0!important;
+    padding:0!important; top:auto!important; overflow:visible!important;
+    break-inside:auto!important; page-break-inside:auto!important;
+  }
+  html body .st-key-report_chart_csm_comp_lat .st-key-csm_comp_lat_current,
+  html body .st-key-report_chart_csm_comp_lat .st-key-csm_comp_lat_comparative {
+    display:flex!important; flex-direction:column!important;
+    justify-content:center!important; gap:2mm!important;
+    position:static!important; top:auto!important;
+    height:auto!important; min-height:var(--report-content-height)!important;
+    overflow:visible!important; break-inside:avoid-page!important;
+    page-break-inside:avoid!important;
+  }
+  html[data-report-print-format="a4"] .st-key-report_chart_csm_comp_lat .st-key-csm_comp_lat_current,
+  html[data-report-print-format="a4"] .st-key-report_chart_csm_comp_lat .st-key-csm_comp_lat_comparative {
+    min-height:235mm!important;
+  }
+  html body .st-key-report_chart_csm_comp_lat .st-key-csm_comp_lat_comparative {
+    break-before:page!important; page-break-before:always!important;
+  }
+  html body .st-key-report_chart_csm_ratio_trend {
+    clear:both!important; break-before:page!important;
+    page-break-before:always!important;
+  }
+  html body .st-key-report_chart_csm_ratio_trend .st-key-report_visual_csm_ratio_trend {
+    position:static!important; top:auto!important;
+    overflow:visible!important;
+  }
+  html body .st-key-report_chart_nb_value_ratios .st-key-report_visual_nb_value_ratios {
+    display:block!important; height:auto!important; min-height:0!important;
+    padding:6mm 0!important; top:auto!important; overflow:visible!important;
+    break-inside:auto!important; page-break-inside:auto!important;
+  }
+  html body .st-key-report_chart_nb_value_ratios [class*="st-key-nb_value_ratio_"] {
+    display:block!important; height:auto!important; min-height:0!important;
+    overflow:visible!important; break-inside:avoid-page!important;
+    page-break-inside:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_nb_value_ratios .st-key-report_visual_nb_value_ratios {
+    padding:0!important; break-inside:avoid-page!important;
+    page-break-inside:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_nb_value_ratios .st-key-report_visual_nb_value_ratios [data-testid="stVerticalBlock"] {
+    gap:1.5mm!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_nb_value_ratios [class*="st-key-nb_value_ratio_"] [data-testid="stVerticalBlock"] {
+    gap:0.5mm!important;
+  }
+  html body .st-key-report_chart_nb_struct {
+    break-before:page!important; page-break-before:always!important;
+  }
+  html body .st-key-report_chart_nb_struct .st-key-report_visual_nb_struct {
+    display:block!important; height:auto!important; min-height:0!important;
+    padding:6mm 0!important; top:auto!important; overflow:visible!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  html[data-report-print-format="a4"] .st-key-report_chart_nb_struct .st-key-nb_ifrs_margin_layout,
+  html[data-report-print-format="a4"] .st-key-report_chart_nb_struct .st-key-nb_ifrs_margin_layout > * {
+    width:100%!important; max-width:100%!important;
+  }
   html[data-report-print-format="a4"] .st-key-report_chart_six_dimensional_charts {
     break-inside:auto!important; page-break-inside:auto!important;
   }
@@ -191,8 +377,7 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
   }
   [class*="st-key-report_figure_"] > *, [class*="st-key-report_table_"] > *,
   [class*="st-key-report_visual_"] > * { width:100%!important; }
-  [class*="st-key-report_table_"],
-  [class*="st-key-report_figure_csm_maturity_table_reinsurance_following"] {
+  [class*="st-key-report_table_"] {
     break-before:page!important; page-break-before:always!important;
   }
   [class*="st-key-report_table_"] .report-table,
@@ -204,8 +389,71 @@ h3 { border:0; padding:0; margin-top:1.2rem; }
   [data-testid="stVegaLiteChart"] canvas,
   [data-testid="stVegaLiteChart"] svg { max-width:100%!important; }
   .report-table, .highlights-wrap { break-inside:avoid-page!important; page-break-inside:avoid!important; }
+  html body .st-key-report_chart_discount_rate .st-key-report_visual_discount_rate {
+    display:block!important; height:auto!important; min-height:0!important;
+    padding:0!important; position:static!important; top:auto!important;
+    overflow:visible!important; break-inside:auto!important; page-break-inside:auto!important;
+  }
+  html body .st-key-report_chart_discount_rate [data-testid="stElementContainer"]:has(.discount-rate-company) {
+    display:block!important; width:100%!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_discount_rate [data-testid="stElementContainer"]:has(.discount-rate-page-start) {
+    break-before:page!important; page-break-before:always!important;
+  }
+  html body .st-key-report_chart_confidence_level {
+    break-before:page!important; page-break-before:always!important;
+    break-after:page!important; page-break-after:always!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  html body .st-key-report_chart_discount_rate .discount-rate-company {
+    width:100%!important; margin:0!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  .discount-rate-wrap { overflow:visible!important; }
+  .discount-rate-table { min-width:0!important; width:100%!important; table-layout:auto!important;
+    font-size:10px!important; break-inside:avoid-page!important; page-break-inside:avoid!important; }
+  .discount-rate-table th, .discount-rate-table td {
+    padding:4px 6px!important; white-space:normal!important; overflow-wrap:anywhere!important;
+  }
+  .appendix-table-wrap { overflow:visible!important; }
+  .appendix-table { min-width:0!important; width:100%!important; font-size:8px!important; }
+  .appendix-table th, .appendix-table td { padding:3px 4px!important; }
   .report-table { font-size:10px; }
   .report-table tr { break-inside:avoid-page!important; page-break-inside:avoid!important; }
+  html:not([data-report-print-format="a4"]) body .st-key-report_chart_equity_trend .st-key-report_visual_equity_trend {
+    display:block!important; height:auto!important; min-height:0!important;
+    position:static!important; top:auto!important; overflow:visible!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  html:not([data-report-print-format="a4"]) body .st-key-report_visual_equity_trend [data-testid="stVerticalBlock"] {
+    gap:2mm!important;
+  }
+  html body .st-key-report_chart_oci_year_lat .st-key-report_visual_oci_year_lat {
+    display:block!important; height:auto!important; min-height:0!important;
+    position:static!important; top:auto!important; overflow:visible!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  .st-key-report_visual_oci_year_lat [data-testid="stVerticalBlock"] { gap:2mm!important; }
+  .st-key-report_visual_oci_year_lat .oci-waterfall-key { gap:4mm; font-size:10px; line-height:1.2; }
+  .st-key-report_visual_oci_year_lat .oci-waterfall-key-card { break-inside:avoid-page; }
+  .st-key-report_visual_oci_year_lat .oci-waterfall-key-note { font-size:9px; margin-top:3px; }
+  html body .st-key-report_chart_oci_deep .st-key-report_visual_oci_deep {
+    display:block!important; min-height:0!important; height:auto!important;
+    overflow:visible!important; position:static!important; top:auto!important;
+    break-inside:auto!important; page-break-inside:auto!important;
+  }
+  html body .st-key-report_chart_oci_deep .st-key-report_table_oci_deep {
+    display:block!important; min-height:0!important; height:auto!important;
+    position:static!important; top:auto!important; padding:6mm 0!important;
+    overflow:visible!important; break-before:page!important; page-break-before:always!important;
+    break-inside:avoid-page!important; page-break-inside:avoid!important;
+  }
+  .st-key-report_table_oci_deep .report-table { width:100%!important; table-layout:fixed; }
+  .st-key-report_table_oci_deep .report-table th,
+  .st-key-report_table_oci_deep .report-table td {
+    overflow-wrap:anywhere; padding:5px 6px;
+  }
   .report-page-break { break-before:page; }
 }
 </style>
@@ -312,9 +560,120 @@ def render_report_table(frame: pd.DataFrame,
     st.html(markup)
 
 
+def render_oci_waterfall_key(keys: list[dict]) -> None:
+    """Place each numbered OCI movement key under its company chart panel."""
+    if not keys:
+        return
+    cards = []
+    for key in keys:
+        title = f"{key['Company']} ({key['Scope']}) · {key['Year']}YE"
+        items = "".join(
+            '<div class="oci-waterfall-key-item">'
+            f'<span class="oci-waterfall-key-number">{number}</span>{escape(label)}'
+            '</div>'
+            for number, label in key["Items"]
+        )
+        supplemental = "".join(
+            f'<div class="oci-waterfall-key-note">Source supplement: {escape(item)}</div>'
+            for item in key["Supplemental items"]
+        )
+        cards.append(
+            '<div class="oci-waterfall-key-card">'
+            f'<div class="oci-waterfall-key-title">{escape(title)}</div>'
+            '<div class="oci-waterfall-key-bridge">'
+            f'1 Net profit → {key["End number"]} Total comprehensive income'
+            '</div>'
+            f'{items}{supplemental}</div>'
+        )
+    st.html(
+        f'<div class="oci-waterfall-key" style="--oci-key-columns:{len(cards)}">'
+        + "".join(cards)
+        + '<div class="oci-waterfall-key-summary">'
+          'Net profit + signed OCI movements = total comprehensive income.'
+          '</div></div>'
+    )
+
+
+def render_oci_comparison_table(frame: pd.DataFrame,
+                                tracked_company: str | None = None) -> None:
+    """Display annual OCI measures as rows with one column per insurer."""
+    if frame.empty:
+        return
+    headers = "".join(f"<th>{escape(str(column))}</th>" for column in frame.columns)
+    body = []
+    for _, row in frame.iterrows():
+        cells = []
+        for column in frame.columns:
+            value = str(row[column])
+            classes = []
+            if value == "Not available":
+                classes.append("unavailable")
+            if tracked_company and str(column).startswith(f"{tracked_company} ("):
+                classes.append("tracked-column")
+            css = f' class="{" ".join(classes)}"' if classes else ""
+            cells.append(f"<td{css}>{escape(value)}</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    st.html('<table class="report-table oci-wide-table"><thead><tr>'
+            + headers + "</tr></thead><tbody>" + "".join(body) + "</tbody></table>")
+
+
 def render_discount_rate_table(frame: pd.DataFrame,
                                tracked_company: str | None = None) -> None:
-    """English year columns with readable multiline currency and basis ranges."""
+    """One tenor-by-column table per insurer, with adjacent annual rows."""
+    if frame.empty:
+        return
+    fixed = ["Company", "Currency / portfolio", "Disclosed rate", "Value form", "Year"]
+    max_rows_per_print_page = 12
+    rows_on_print_page = 0
+    previous_company_oversized = False
+    for company_index, (company, company_rows) in enumerate(
+        frame.groupby("Company", sort=False)
+    ):
+        tenors = [column for column in frame.columns if column not in fixed
+                  and company_rows[column].ne("Not disclosed").any()]
+        columns = [*fixed[1:], *tenors]
+        headers = "".join(f"<th>{escape(str(column))}</th>" for column in columns)
+        bodies = []
+        for _, year_pair in company_rows.groupby(
+            ["Currency / portfolio", "Disclosed rate", "Value form"], sort=False
+        ):
+            body = []
+            for _, row in year_pair.iterrows():
+                cells = []
+                for column in columns:
+                    value = str(row[column])
+                    css = ' class="unavailable"' if value == "Not disclosed" else ""
+                    cells.append(f"<td{css}>{escape(value)}</td>")
+                body.append("<tr>" + "".join(cells) + "</tr>")
+            bodies.append('<tbody class="rate-year-pair">' + "".join(body) + '</tbody>')
+        row_count = len(company_rows)
+        page_start = company_index > 0 and (
+            previous_company_oversized
+            or row_count > max_rows_per_print_page
+            or rows_on_print_page + row_count > max_rows_per_print_page
+        )
+        if page_start:
+            rows_on_print_page = 0
+        rows_on_print_page += row_count
+        previous_company_oversized = row_count > max_rows_per_print_page
+        selected = bool(tracked_company and (
+            company == tracked_company or company.startswith(f"{tracked_company} (")
+        ))
+        card_classes = ["discount-rate-company"]
+        if selected:
+            card_classes.append("tracked-company")
+        if page_start:
+            card_classes.append("discount-rate-page-start")
+        card_class = " ".join(card_classes)
+        st.html(f'<section class="{card_class}"><div class="discount-rate-company-title">'
+                + escape(str(company)) + '</div><div class="discount-rate-wrap"><table '
+                + 'class="report-table discount-rate-table"><thead><tr>' + headers
+                + '</tr></thead>' + "".join(bodies) + '</table></div></section>')
+
+
+def render_confidence_level_table(frame: pd.DataFrame,
+                                  tracked_company: str | None = None) -> None:
+    """Include grey missing cells rather than omitting insurers without a rate."""
     if frame.empty:
         return
     headers = "".join(f"<th>{escape(str(column))}</th>" for column in frame.columns)
@@ -324,11 +683,142 @@ def render_discount_rate_table(frame: pd.DataFrame,
         for column in frame.columns:
             value = str(row[column])
             css = ' class="unavailable"' if value == "Not disclosed" else ""
-            cells.append(f"<td{css}>{escape(value).replace(chr(10), '<br>')}</td>")
-        row_class = ' class="tracked-company"' if row.get("Company") == tracked_company else ""
+            cells.append(f"<td{css}>{escape(value)}</td>")
+        row_class = (' class="tracked-company"' if tracked_company and
+                     str(row.get("Company", "")).startswith(f"{tracked_company} (") else "")
         body.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
-    st.html('<table class="report-table discount-rate-table"><thead><tr>'
+    st.html('<table class="report-table confidence-level-table"><thead><tr>'
             + headers + "</tr></thead><tbody>" + "".join(body) + "</tbody></table>")
+
+
+def render_financial_performance_table(frame: pd.DataFrame,
+                                       tracked_company: str | None = None) -> None:
+    """Display the selected ratios with explicit, shaded unavailable cells."""
+    if frame.empty:
+        return
+    st.html(_financial_performance_table_html(frame, tracked_company))
+
+
+def _financial_performance_table_html(frame: pd.DataFrame,
+                                      tracked_company: str | None = None) -> str:
+    """Build one escaped ratio table shared by insurer and peer views."""
+    headers = "".join(f"<th>{escape(str(column))}</th>" for column in frame.columns)
+    body = []
+    for _, row in frame.iterrows():
+        cells = []
+        for column in frame.columns:
+            value = str(row[column])
+            css = ' class="unavailable"' if value == "Unavailable" else ""
+            cells.append(f"<td{css}>{escape(value)}</td>")
+        row_class = (' class="tracked-company"' if tracked_company and
+                     str(row.get("Company", "")).startswith(f"{tracked_company} (") else "")
+        body.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
+    return ('<table class="report-table financial-performance-table"><thead><tr>'
+            + headers + "</tr></thead><tbody>" + "".join(body) + "</tbody></table>")
+
+
+def render_financial_performance_peer_tables(frame: pd.DataFrame,
+                                             tracked_company: str | None = None) -> None:
+    """Compare selected insurers in one compact table per ratio."""
+    if frame.empty:
+        return
+    cards = []
+    for indicator, group in frame.groupby("Indicator", sort=False):
+        compact = group.drop(columns="Indicator")
+        cards.append('<section class="financial-performance-card"><div '
+                     f'class="financial-performance-card-title">{escape(str(indicator))}</div>'
+                     + _financial_performance_table_html(compact, tracked_company)
+                     + '</section>')
+    st.html('<div class="financial-performance-grid">' + "".join(cards) + '</div>')
+
+
+def render_csm_rollforward_table(frame: pd.DataFrame,
+                                 tracked_company: str | None = None) -> None:
+    """Show the CSM bridge as a compact table, visibly marking unavailable inputs."""
+    if frame.empty:
+        return
+    headers = "".join(f"<th>{escape(str(column))}</th>" for column in frame.columns)
+    body = []
+    for _, row in frame.iterrows():
+        cells = []
+        for column in frame.columns:
+            value = str(row[column])
+            css = ' class="unavailable"' if value == "Not disclosed" else ""
+            cells.append(f"<td{css}>{escape(value)}</td>")
+        company = str(row["Company"])
+        selected = bool(tracked_company and company.startswith(f"{tracked_company} ("))
+        row_class = ' class="tracked-company"' if selected else ""
+        body.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
+    st.html('<table class="report-table csm-rollforward-table"><thead><tr>'
+            + headers + "</tr></thead><tbody>" + "".join(body) + "</tbody></table>")
+
+
+def render_equity_movement_table(frame: pd.DataFrame,
+                                 tracked_company: str | None = None, *,
+                                 period_label: str | None = None,
+                                 unit: str = "millions") -> None:
+    """Keep unavailable cells grey and highlight the tracked insurer's column."""
+    if frame.empty:
+        return
+    headers = "".join(f"<th>{escape(str(column))}</th>" for column in frame.columns)
+    body = []
+    for _, row in frame.iterrows():
+        cells = []
+        for column in frame.columns:
+            value = str(row[column])
+            classes = []
+            if value == "Not disclosed":
+                classes.append("unavailable")
+            if tracked_company and str(column).startswith(f"{tracked_company} ("):
+                classes.append("tracked-column")
+            css = f' class="{" ".join(classes)}"' if classes else ""
+            cells.append(f"<td{css}>{escape(value)}</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    heading = (
+        '<div class="equity-movement-meta">' + escape(period_label)
+        + ' · Amounts in ' + escape(unit) + '</div>'
+        if period_label else ""
+    )
+    st.html(heading + '<table class="report-table equity-movement-table"><thead><tr>'
+            + headers + "</tr></thead><tbody>" + "".join(body) + "</tbody></table>")
+
+
+def render_appendix_year_tables(tables: dict[str, pd.DataFrame], *,
+                                tracked_company: str | None = None,
+                                unit_label: str = "millions") -> None:
+    """Render one annual detail table with explicit gaps and source scope per column."""
+    for period, frame in tables.items():
+        if frame.empty:
+            continue
+        columns = [column for column in frame.columns if column != "_kind"]
+        headers = "".join(f"<th>{escape(str(column))}</th>" for column in columns)
+        body = []
+        for _, row in frame.iterrows():
+            kind = str(row["_kind"])
+            if kind == "section":
+                body.append('<tr class="section"><td colspan="'
+                            + str(len(columns)) + '">' + escape(str(row["Item"]))
+                            + '</td></tr>')
+                continue
+            cells = []
+            for column in columns:
+                value = str(row[column])
+                classes = []
+                if value in {"Not disclosed", "Not available", "FX unavailable"}:
+                    classes.append("unavailable")
+                if tracked_company and str(column).startswith(f"{tracked_company} ("):
+                    classes.append("tracked-column")
+                css = f' class="{" ".join(classes)}"' if classes else ""
+                cells.append(f"<td{css}>{escape(value)}</td>")
+            body.append(f'<tr class="{escape(kind)}">' + "".join(cells) + '</tr>')
+        title = f"{str(period)[:4]}YE · Analysis"
+        st.html('<section class="appendix-year"><div class="appendix-year-heading">'
+                '<div class="appendix-year-title">' + escape(title)
+                + '</div><div class="appendix-unit">Unit: ' + escape(unit_label)
+                + '</div></div><div class="appendix-table-wrap"><table '
+                + 'class="report-table appendix-table"><thead><tr>' + headers
+                + '</tr></thead><tbody>' + "".join(body)
+                + '</tbody></table></div></section>')
 
 
 def render_financial_highlights_table(frame: pd.DataFrame, period: str,
@@ -339,11 +829,15 @@ def render_financial_highlights_table(frame: pd.DataFrame, period: str,
     prior = str(int(period[:4]) - 1)
     current = period[:4]
     headers = ["<th>Company</th>"]
-    for index, (label, formula) in enumerate(HIGHLIGHT_COLUMNS):
+    notes = []
+    for index, ((_, formula), display_label) in enumerate(
+        zip(HIGHLIGHT_COLUMNS, HIGHLIGHT_DISPLAY_LABELS)
+    ):
         year_line = (f"{current}YE/{current} opening−1" if index == 0 else
                      f"{current}YE/{prior}YE−1" if index in (1, 2, 3, 6, 7) else "")
-        headers.append(f"<th>{escape(label)}<br>{escape(formula)}"
-                       + (f"<br>{year_line}" if year_line else "") + "</th>")
+        headers.append(f"<th>{escape(display_label)}</th>")
+        notes.append(f"{display_label}: {formula}"
+                     + (f" （{year_line}）" if year_line else ""))
     body = []
     for _, row in frame.iterrows():
         cells = [f"<td>{escape(str(row['Company']))}</td>"]
@@ -356,6 +850,9 @@ def render_financial_highlights_table(frame: pd.DataFrame, period: str,
     st.html('<div class="highlights-wrap"><table class="highlights-table"><thead><tr>'
             + "".join(headers) + "</tr></thead><tbody>" + "".join(body)
             + "</tbody></table></div>")
+    st.caption("Notes\n\n" + "\n".join(
+        f"{index}. {note}" for index, note in enumerate(notes, 1)
+    ))
 
 
 def print_controls(key: str, *, all_mode: bool = False) -> bool:

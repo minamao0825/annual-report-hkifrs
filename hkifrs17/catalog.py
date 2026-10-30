@@ -89,12 +89,25 @@ METRICS = (
     Metric("OCI_REINS_FINANCE", "Reinsurance finance result in OCI", "Comprehensive income", "flow"),
     Metric("OCI_HEDGE", "Cash flow hedge result in OCI", "Comprehensive income", "flow"),
     Metric("OCI_TAX", "Income tax relating to OCI", "Comprehensive income", "flow"),
+    Metric("OCI_FAIR_VALUE_RESERVE", "Fair value reserve movement in OCI", "Comprehensive income", "flow"),
+    Metric("OCI_FX_TRANSLATION", "Foreign operation translation in OCI", "Comprehensive income", "flow"),
+    Metric("OCI_ECL_ADJUSTMENT", "Expected credit loss adjustment in OCI", "Comprehensive income", "flow"),
     Metric("FIN_ASSET_AC", "Financial assets measured at amortised cost", "Financial investments", "stock"),
+    Metric("FIN_ASSET_AC_DEBT", "AC debt securities", "Financial investments", "stock"),
+    Metric("FIN_ASSET_AC_LOANS", "AC loans and deposits", "Financial investments", "stock"),
     Metric("FIN_ASSET_FVOCI_DEBT", "FVOCI debt securities", "Financial investments", "stock"),
     Metric("FIN_ASSET_FVOCI_EQUITY", "FVOCI equity securities", "Financial investments", "stock"),
     Metric("FIN_ASSET_FVTPL_DEBT", "FVTPL debt securities", "Financial investments", "stock"),
     Metric("FIN_ASSET_FVTPL_EQUITY", "FVTPL equity securities", "Financial investments", "stock"),
     Metric("FIN_ASSET_FVTPL_FUNDS", "FVTPL investment funds", "Financial investments", "stock"),
+    Metric("FIN_ASSET_FVTPL_INTEREST", "FVTPL fixed and variable interest investments", "Financial investments", "stock"),
+    Metric("FIN_ASSET_FVTPL_TRUST_EQUITY", "FVTPL unit trusts and equities", "Financial investments", "stock"),
+    Metric("FIN_ASSET_FVTPL_PARTNERSHIPS", "FVTPL limited partnerships", "Financial investments", "stock"),
+    Metric("FIN_ASSET_FVTPL_MORTGAGES", "FVTPL mortgage loan investments", "Financial investments", "stock"),
+    Metric("FIN_ASSET_FVTPL_LOANS", "FVTPL loans and receivables", "Financial investments", "stock"),
+    Metric("FIN_ASSET_FVTPL_UNLISTED_EQ_OTHER", "FVTPL unlisted equity and other securities", "Financial investments", "stock"),
+    Metric("FIN_ASSET_FVTPL_DERIVATIVES", "FVTPL derivative financial instruments", "Financial investments", "stock"),
+    Metric("FIN_ASSET_TOTAL", "Financial investments total", "Financial investments", "stock"),
     Metric("EQUITY_OPEN", "Opening equity", "Equity movement", "stock"),
     Metric("EQUITY_DIVIDENDS", "Dividends paid", "Equity movement", "flow"),
     Metric("EQUITY_NEW_CAPITAL", "Share capital issued", "Equity movement", "flow"),
@@ -138,8 +151,18 @@ METRICS = (
     Metric("INS_NONPAA_PVFCF_CLOSE", "Insurance non-PAA: closing PV of future cash flows", "Insurance measurement", "stock"),
     Metric("INS_NONPAA_RA_CLOSE", "Insurance non-PAA: closing risk adjustment", "Insurance measurement", "stock"),
     Metric("INS_NONPAA_CSM_CLOSE", "Insurance non-PAA: closing CSM subtotal", "Insurance measurement", "stock"),
+    Metric("INS_GROSS_OPEN", "Insurance contracts all methods: gross opening balance", "Insurance gross rollforward", "stock"),
+    Metric("INS_GROSS_PL_OCI", "Insurance contracts all methods: profit or loss and OCI changes", "Insurance gross rollforward", "flow"),
+    Metric("INS_GROSS_CASH", "Insurance contracts all methods: cash-flow changes", "Insurance gross rollforward", "flow"),
+    Metric("INS_GROSS_CLOSE", "Insurance contracts all methods: gross closing balance", "Insurance gross rollforward", "stock"),
+    Metric("INS_ACQ_ASSET_CLOSE", "Insurance acquisition cash-flow asset: signed closing amount", "Insurance gross rollforward", "stock"),
+    Metric("INS_CSM_FV_OPEN", "Insurance CSM: opening fair value transition column", "CSM transition", "stock"),
+    Metric("INS_CSM_OTHER_OPEN", "Insurance CSM: opening other contracts column", "CSM transition", "stock"),
     Metric("INS_CSM_FV_CLOSE", "Insurance CSM: fair value transition", "CSM transition", "stock"),
+    Metric("INS_CSM_MOD_CLOSE", "Insurance CSM: modified retrospective transition", "CSM transition", "stock"),
     Metric("INS_CSM_OTHER_CLOSE", "Insurance CSM: other contracts", "CSM transition", "stock"),
+    Metric("INS_CSM_FV_PL_OCI", "Insurance CSM: fair value transition total profit or loss and OCI changes", "CSM movement", "flow"),
+    Metric("INS_CSM_OTHER_PL_OCI", "Insurance CSM: other contracts total profit or loss and OCI changes", "CSM movement", "flow"),
     Metric("INS_CSM_FV_RELEASE", "Insurance CSM release: fair value transition", "CSM movement", "flow"),
     Metric("INS_CSM_OTHER_RELEASE", "Insurance CSM release: other contracts", "CSM movement", "flow"),
     Metric("CSM_ESTIMATE_CHANGE", "Insurance CSM: changes in estimates", "CSM movement", "flow"),
@@ -147,6 +170,8 @@ METRICS = (
     Metric("REINS_NONPAA_PVFCF_CLOSE", "Reinsurance non-PAA: closing PV of future cash flows", "Reinsurance measurement", "stock"),
     Metric("REINS_NONPAA_RA_CLOSE", "Reinsurance non-PAA: closing risk adjustment", "Reinsurance measurement", "stock"),
     Metric("REINS_NONPAA_CSM_CLOSE", "Reinsurance non-PAA: closing CSM subtotal", "Reinsurance measurement", "stock"),
+    Metric("REINS_CSM_FV_OPEN", "Reinsurance CSM: opening fair value transition column", "Reinsurance CSM", "stock"),
+    Metric("REINS_CSM_OTHER_OPEN", "Reinsurance CSM: opening other contracts column", "Reinsurance CSM", "stock"),
     Metric("REINS_CSM_FV_CLOSE", "Reinsurance CSM: fair value transition", "Reinsurance CSM", "stock"),
     Metric("REINS_CSM_MOD_CLOSE", "Reinsurance CSM: modified retrospective transition", "Reinsurance CSM", "stock"),
     Metric("REINS_CSM_OTHER_CLOSE", "Reinsurance CSM: other contracts", "Reinsurance CSM", "stock"),
@@ -204,8 +229,44 @@ METRICS += tuple(
     for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y")
     for basis in ("RF", "ILP")
 )
+METRICS += tuple(
+    Metric(f"DISCOUNT_{currency}_{tenor}_SPOT_{bound}",
+           f"{currency} {tenor} disclosed spot-rate range · {bound.lower()} bound",
+           "Discount rates", "rate")
+    for currency in ("CNY", "HKD", "USD")
+    for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y")
+    for bound in ("LOW", "HIGH")
+)
+METRICS += tuple(
+    Metric(f"DISCOUNT_CNY_{tenor}_PREMIUM",
+           f"RMB NP / RMB UL {tenor} disclosed illiquidity premium",
+           "Discount rates", "rate")
+    for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y")
+)
+METRICS += tuple(
+    Metric(f"DISCOUNT_OTHER_PORTFOLIOS_{tenor}_{basis}",
+           f"Other portfolios {tenor} "
+           f"{'risk-free spot rate' if basis == 'RF' else 'illiquidity premium upper bound'}",
+           "Discount rates", "rate")
+    for tenor in ("1Y", "5Y", "10Y", "15Y", "20Y")
+    for basis in ("RF", "PREMIUM_UP_TO")
+)
 METRICS += (Metric("RA_CONFIDENCE_PCT", "Risk adjustment target confidence level", "Risk adjustment", "rate"),)
 METRICS += (Metric("INV_YIELD", "Disclosed investment yield", "Investment performance", "rate"),)
+METRICS += (
+    Metric("INV_INTEREST_EIR", "Investment note: effective-interest revenue", "Investment note components", "flow"),
+    Metric("INV_OTHER_REV_UNDERLYING_DESIGNATED", "Other investment revenue: underlying designated FVPL gains", "Investment note components", "flow"),
+    Metric("INV_OTHER_REV_UNDERLYING_MANDATORY", "Other investment revenue: underlying mandatory FVPL gains subtotal", "Investment note components", "flow"),
+    Metric("INV_OTHER_REV_UNDERLYING_INCOME", "Other investment revenue: underlying other investment income subtotal", "Investment note components", "flow"),
+    Metric("INV_OTHER_REV_NONUNDERLYING_AC_FVOCI", "Other investment revenue: non-underlying AC/FVOCI gains subtotal", "Investment note components", "flow"),
+    Metric("INV_OTHER_REV_NONUNDERLYING_FVPL", "Other investment revenue: non-underlying FVPL gains subtotal", "Investment note components", "flow"),
+    Metric("INV_OTHER_REV_NONUNDERLYING_INCOME", "Other investment revenue: non-underlying other investment income subtotal", "Investment note components", "flow"),
+    Metric("INV_OTHER_REV_TOTAL", "Other investment revenue: explicitly printed total", "Investment note components", "flow"),
+    Metric("INV_IMPAIRMENT_AC", "Investment impairment: amortised-cost debt securities", "Investment note components", "flow"),
+    Metric("INV_IMPAIRMENT_FVOCI", "Investment impairment: FVOCI debt securities", "Investment note components", "flow"),
+    Metric("INV_IMPAIRMENT_TOTAL", "Investment impairment: explicitly printed total", "Investment note components", "flow"),
+)
+EXTRACTION_COMPONENT_VERSION = 2
 METRIC_BY_CODE = {metric.code: metric for metric in METRICS}
 
 # Every metric has a visible home in the report pages. The active Step 5/6
@@ -219,13 +280,26 @@ INSURER_CHART_GROUPS = (
                       "EXP_NOTE_AMORTISATION", "EXP_NOTE_MARKETING", "EXP_NOTE_PROFESSIONAL", "EXP_NOTE_IT",
                       "EXP_NOTE_INV_MGMT", "EXP_NOTE_OTHER", "EXP_NOTE_TOTAL")),
     ("Investment", ("INV_RETURN", "NET_INV_INCOME")),
+    ("Investment note components", (
+        "INV_INTEREST_EIR", "INV_OTHER_REV_UNDERLYING_DESIGNATED",
+        "INV_OTHER_REV_UNDERLYING_MANDATORY", "INV_OTHER_REV_UNDERLYING_INCOME",
+        "INV_OTHER_REV_NONUNDERLYING_AC_FVOCI", "INV_OTHER_REV_NONUNDERLYING_FVPL",
+        "INV_OTHER_REV_NONUNDERLYING_INCOME", "INV_OTHER_REV_TOTAL",
+        "INV_IMPAIRMENT_AC", "INV_IMPAIRMENT_FVOCI", "INV_IMPAIRMENT_TOTAL",
+    )),
     ("Investment and finance result", ("NET_INV_RESULT", "INS_FINANCE_PL", "REINS_FINANCE_PL")),
     ("Investment totals including OCI", ("INV_RETURN_TOTAL", "INS_FINANCE_TOTAL", "REINS_FINANCE_TOTAL", "NET_INV_RESULT_TOTAL")),
     ("Profitability", ("PBT", "TAX_EXPENSE", "PROFIT", "OTHER_REVENUE", "OTHER_EXPENSE", "FINANCE_COST")),
     ("Comprehensive income", ("OCI_TOTAL", "COMPREHENSIVE_INCOME")),
-    ("OCI components", ("OCI_FVOCI_DEBT", "OCI_FVOCI_RECYCLE", "OCI_INS_FINANCE", "OCI_REINS_FINANCE", "OCI_HEDGE", "OCI_TAX")),
+    ("OCI components", ("OCI_FVOCI_DEBT", "OCI_FVOCI_RECYCLE", "OCI_INS_FINANCE", "OCI_REINS_FINANCE", "OCI_HEDGE", "OCI_TAX",
+                        "OCI_FAIR_VALUE_RESERVE", "OCI_FX_TRANSLATION", "OCI_ECL_ADJUSTMENT")),
     ("Financial position", ("TOTAL_ASSETS", "TOTAL_LIABS", "EQUITY")),
-    ("Financial investments", ("FIN_ASSET_AC", "FIN_ASSET_FVOCI_DEBT", "FIN_ASSET_FVOCI_EQUITY", "FIN_ASSET_FVTPL_DEBT", "FIN_ASSET_FVTPL_EQUITY", "FIN_ASSET_FVTPL_FUNDS")),
+    ("Financial investments", ("FIN_ASSET_TOTAL", "FIN_ASSET_AC", "FIN_ASSET_AC_DEBT", "FIN_ASSET_AC_LOANS",
+                               "FIN_ASSET_FVOCI_DEBT", "FIN_ASSET_FVOCI_EQUITY", "FIN_ASSET_FVTPL_DEBT",
+                               "FIN_ASSET_FVTPL_EQUITY", "FIN_ASSET_FVTPL_FUNDS", "FIN_ASSET_FVTPL_INTEREST",
+                               "FIN_ASSET_FVTPL_TRUST_EQUITY", "FIN_ASSET_FVTPL_PARTNERSHIPS",
+                               "FIN_ASSET_FVTPL_MORTGAGES", "FIN_ASSET_FVTPL_LOANS",
+                               "FIN_ASSET_FVTPL_UNLISTED_EQ_OTHER", "FIN_ASSET_FVTPL_DERIVATIVES")),
     ("Investment assets note", ("INV_NOTE_DEBT", "INV_NOTE_EQUITY", "INV_NOTE_FUNDS",
                                 "INV_NOTE_GOV_BONDS", "INV_NOTE_CORP_BONDS", "INV_NOTE_STRUCTURED")),
     ("Equity movement", ("EQUITY_OPEN", "EQUITY_DIVIDENDS", "EQUITY_NEW_CAPITAL", "EQUITY_OTHER")),
@@ -233,18 +307,22 @@ INSURER_CHART_GROUPS = (
     ("Contract method split", ("INS_LIABS_NONPAA_CLOSE", "INS_LIABS_PAA_CLOSE", "REINS_ASSETS_NONPAA_CLOSE", "REINS_ASSETS_PAA_CLOSE")),
     ("CSM", ("CSM_OPEN", "CSM_NEW", "CSM_RELEASE", "CSM_NET_MOVEMENT", "CSM_CLOSE")),
     ("Insurance non-PAA movement", ("INS_NONPAA_NET_OPEN", "INS_NONPAA_PL_OCI", "INS_NONPAA_CASH", "INS_NONPAA_NET_CLOSE")),
+    ("Insurance gross rollforward", ("INS_GROSS_OPEN", "INS_GROSS_PL_OCI", "INS_GROSS_CASH",
+                                     "INS_GROSS_CLOSE", "INS_ACQ_ASSET_CLOSE")),
     ("Insurance PAA movement", ("INS_PAA_NET_OPEN", "INS_PAA_PL_OCI", "INS_PAA_CASH", "INS_PAA_NET_CLOSE")),
     ("Insurance non-PAA components", ("INS_NONPAA_LRC_CLOSE", "INS_NONPAA_LC_CLOSE", "INS_NONPAA_LIC_CLOSE")),
     ("Insurance PAA components", ("INS_PAA_LRC_CLOSE", "INS_PAA_LC_CLOSE", "INS_PAA_LIC_CLOSE")),
-    ("Insurance CSM transition", ("INS_CSM_FV_CLOSE", "INS_CSM_OTHER_CLOSE")),
-    ("Insurance CSM movements", ("INS_CSM_FV_RELEASE", "INS_CSM_OTHER_RELEASE", "CSM_ESTIMATE_CHANGE", "CSM_FINANCE_CHANGE")),
+    ("Insurance CSM transition", ("INS_CSM_FV_OPEN", "INS_CSM_OTHER_OPEN", "INS_CSM_FV_CLOSE", "INS_CSM_MOD_CLOSE", "INS_CSM_OTHER_CLOSE")),
+    ("Insurance CSM movements", ("INS_CSM_FV_RELEASE", "INS_CSM_OTHER_RELEASE",
+                                 "INS_CSM_FV_PL_OCI", "INS_CSM_OTHER_PL_OCI",
+                                 "CSM_ESTIMATE_CHANGE", "CSM_FINANCE_CHANGE")),
     ("Insurance note movement", ("INS_LIABS_NOTE_OPEN", "INS_LIABS_NOTE_MOVEMENT", "INS_LIABS_NOTE_CLOSE", "INS_NOTE_NET_OPEN", "INS_NOTE_PL_OCI", "INS_NOTE_CASHFLOWS", "INS_NOTE_NET_CLOSE")),
     ("Insurance measurement", ("INS_NONPAA_PVFCF_OPEN", "INS_NONPAA_RA_OPEN", "INS_NONPAA_PVFCF_CLOSE", "INS_NONPAA_RA_CLOSE", "INS_NONPAA_CSM_CLOSE", "INS_NOTE_PVFCF_CLOSE", "INS_NOTE_RA_CLOSE", "INS_NOTE_CSM_CLOSE")),
     ("Reinsurance non-PAA movement", ("REINS_NONPAA_NET_OPEN", "REINS_NONPAA_PL_OCI", "REINS_NONPAA_CASH", "REINS_NONPAA_NET_CLOSE")),
     ("Reinsurance PAA movement", ("REINS_PAA_NET_OPEN", "REINS_PAA_PL_OCI", "REINS_PAA_CASH", "REINS_PAA_NET_CLOSE")),
     ("Reinsurance non-PAA components", ("REINS_NONPAA_ARC_CLOSE", "REINS_NONPAA_LOSS_RECOVERY_CLOSE", "REINS_NONPAA_AIC_CLOSE")),
     ("Reinsurance PAA components", ("REINS_PAA_ARC_CLOSE", "REINS_PAA_LOSS_RECOVERY_CLOSE", "REINS_PAA_AIC_CLOSE")),
-    ("Reinsurance CSM transition", ("REINS_CSM_MOD_CLOSE", "REINS_CSM_FV_CLOSE", "REINS_CSM_OTHER_CLOSE")),
+    ("Reinsurance CSM transition", ("REINS_CSM_FV_OPEN", "REINS_CSM_OTHER_OPEN", "REINS_CSM_MOD_CLOSE", "REINS_CSM_FV_CLOSE", "REINS_CSM_OTHER_CLOSE")),
     ("Reinsurance CSM release", ("REINS_CSM_RELEASE",)),
     ("Reinsurance note movement", ("REINS_ASSETS_NOTE_OPEN", "REINS_ASSETS_NOTE_MOVEMENT", "REINS_ASSETS_NOTE_CLOSE", "REINS_NOTE_NET_OPEN", "REINS_NOTE_PL_OCI", "REINS_NOTE_CASHFLOWS", "REINS_NOTE_NET_CLOSE")),
     ("Reinsurance measurement", ("REINS_NONPAA_PVFCF_CLOSE", "REINS_NONPAA_RA_CLOSE", "REINS_NONPAA_CSM_CLOSE", "REINS_NOTE_PVFCF_CLOSE", "REINS_NOTE_RA_CLOSE", "REINS_NOTE_CSM_CLOSE")),
@@ -259,7 +337,12 @@ PEER_METRIC_GROUPS = (
     ("Investment and profit", ("INV_RETURN", "NET_INV_INCOME", "NET_INV_RESULT", "PBT", "TAX_EXPENSE", "PROFIT")),
     ("Comprehensive income", ("OCI_TOTAL", "COMPREHENSIVE_INCOME", "OCI_INS_FINANCE", "OCI_REINS_FINANCE")),
     ("Financial position", ("TOTAL_ASSETS", "TOTAL_LIABS", "EQUITY", "INS_ASSETS", "INS_LIABS", "REINS_ASSETS", "REINS_LIABS")),
-    ("Financial investments", ("FIN_ASSET_FVOCI_DEBT", "FIN_ASSET_FVTPL_DEBT", "FIN_ASSET_FVTPL_EQUITY", "FIN_ASSET_FVTPL_FUNDS")),
+    ("Financial investments", ("FIN_ASSET_AC_DEBT", "FIN_ASSET_AC_LOANS", "FIN_ASSET_FVOCI_DEBT",
+                               "FIN_ASSET_FVTPL_DEBT", "FIN_ASSET_FVTPL_EQUITY", "FIN_ASSET_FVTPL_FUNDS",
+                               "FIN_ASSET_FVTPL_INTEREST", "FIN_ASSET_FVTPL_TRUST_EQUITY",
+                               "FIN_ASSET_FVTPL_PARTNERSHIPS", "FIN_ASSET_FVTPL_MORTGAGES",
+                               "FIN_ASSET_FVTPL_LOANS", "FIN_ASSET_FVTPL_UNLISTED_EQ_OTHER",
+                               "FIN_ASSET_FVTPL_DERIVATIVES")),
     ("Insurance revenue split", ("REV_NONPAA_TOTAL", "REV_PAA_TOTAL", "REV_CSM_SERVICE", "REV_RA_RELEASE")),
     ("CSM and new business", ("INS_NONPAA_CSM_CLOSE", "CSM_NEW", "CSM_RELEASE", "NB_INS_PROFIT_CSM")),
     ("Cash flow", ("OPERATING_CF", "INVESTING_CF", "FINANCING_CF", "NET_CASH_CHANGE", "CASH_OPEN", "CASH_CLOSE")),
@@ -285,7 +368,7 @@ PILOT_FILINGS = (
             (28, "Comprehensive income"), (30, "Financial position"),
             (31, "Equity movement"), (33, "Cash flows"),
         ),
-        "page_rotation_hints": {31: 90},
+        "page_rotation_hints": {31: 90, 113: 90},
         "note": "The PDF is image based. Page 15 is a business review, while the primary statements use Hong Kong dollars.",
     },
     {

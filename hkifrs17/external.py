@@ -7,15 +7,17 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 
 import pandas as pd
 
 from .checks import RULE_BY_ID, evaluate_checks, normalize_plan
-from .data import COLUMNS, empty_records, normalize_records
-from .storage import DATA, EXTERNAL_FILINGS_FILE, all_filings, load_integrated
+from .data import COLUMNS, NUMERIC_VALUE_STATUSES, empty_records, normalize_records
+from .storage import DATA, EXTERNAL_FILINGS_FILE, all_filings, integration_status, load_integrated
 
 
 EXTERNAL_RECORDS_FILE = DATA / "external_records.json"
+EXTERNAL_IMPORTS_FILE = DATA / "external_imports.json"
 
 
 def _atomic_json(path: Path, value: object) -> None:
@@ -84,9 +86,9 @@ def validate_external_workbook(workbook_bytes: bytes) -> tuple[pd.DataFrame, lis
         profiles = _new_profiles(raw)
         filings = [*all_filings(), *profiles]
         records = normalize_records(raw, filings)
-        reported = records["Value status"].eq("Reported")
+        reported = records["Value status"].isin(NUMERIC_VALUE_STATUSES)
         if not records.loc[reported, "Review status"].eq("Verified").all():
-            raise ValueError("Reported cells must be Verified before import into analysis.")
+            raise ValueError("Reported and derived cells must be Verified before import into analysis.")
         # Aligned workbooks may include blank Not disclosed rows so every
         # insurer has the same metric list. They are audit markers, not values.
         records = records.loc[reported].copy()
@@ -118,6 +120,11 @@ def load_external() -> pd.DataFrame:
 def save_external_workbook(workbook_bytes: bytes) -> tuple[int, pd.DataFrame]:
     records, profiles, checks = validate_external_workbook(workbook_bytes)
     current = load_external()
+    old_epoch = EXTERNAL_RECORDS_FILE.stat().st_mtime if EXTERNAL_RECORDS_FILE.exists() else 0.0
+    import_times = (json.loads(EXTERNAL_IMPORTS_FILE.read_text(encoding="utf-8"))
+                    if EXTERNAL_IMPORTS_FILE.exists() else {})
+    for document_id in current["Document ID"].unique() if not current.empty else []:
+        import_times.setdefault(str(document_id), old_epoch)
     if not current.empty:
         # A workbook is one complete filing snapshot. Old comparative cells
         # from that document must not survive a current-year-only replacement.
@@ -128,18 +135,37 @@ def save_external_workbook(workbook_bytes: bytes) -> tuple[int, pd.DataFrame]:
         prior = json.loads(EXTERNAL_FILINGS_FILE.read_text(encoding="utf-8")) if EXTERNAL_FILINGS_FILE.exists() else []
         _atomic_json(EXTERNAL_FILINGS_FILE, [*prior, *profiles])
     _atomic_json(EXTERNAL_RECORDS_FILE, combined.where(pd.notna(combined), None).to_dict("records"))
+    for document_id in records["Document ID"].unique():
+        import_times[str(document_id)] = time.time()
+    _atomic_json(EXTERNAL_IMPORTS_FILE, import_times)
     return len(records), checks
 
 
 def load_analysis_records() -> pd.DataFrame:
-    """External filing snapshots override integrated filings on both pages."""
+    """Use the latest reviewed snapshot for each filing on both report pages."""
     base = load_integrated()
     external = load_external()
     if external.empty:
         return base
     if base.empty:
         return external
-    base = base[~base["Document ID"].isin(external["Document ID"])].copy()
+    status = integration_status()
+    integrated_file = DATA / "integrated_records.xlsx"
+    integrated_epoch = float(status.get("integrated_epoch") or
+                             (integrated_file.stat().st_mtime if integrated_file.exists() else 0.0))
+    old_epoch = EXTERNAL_RECORDS_FILE.stat().st_mtime if EXTERNAL_RECORDS_FILE.exists() else 0.0
+    import_times = (json.loads(EXTERNAL_IMPORTS_FILE.read_text(encoding="utf-8"))
+                    if EXTERNAL_IMPORTS_FILE.exists() else {})
+    integrated_ids = set(base["Document ID"])
+    newer_external = {
+        document_id for document_id in set(external["Document ID"])
+        if document_id not in integrated_ids or
+        float(import_times.get(document_id, old_epoch)) > integrated_epoch
+    }
+    external = external[external["Document ID"].isin(newer_external)].copy()
+    base = base[~base["Document ID"].isin(newer_external)].copy()
     if base.empty:
         return external
+    if external.empty:
+        return base
     return normalize_records(pd.concat([base, external], ignore_index=True), all_filings())

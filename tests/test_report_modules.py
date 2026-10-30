@@ -2,16 +2,21 @@
 
 import json
 import pandas as pd
+import pytest
 
 from hkifrs17.catalog import METRIC_BY_CODE
-from hkifrs17.charts import analytical_ratio_rows, peer_group_panels, period_bars
+from hkifrs17.charts import analytical_ratio_rows, csm_ratio_trend_chart, peer_group_panels, period_bars
 from hkifrs17.metric_blueprint import CHART_REQUIREMENTS
 from hkifrs17.demo import demo_records
+from hkifrs17.external import load_analysis_records
+from hkifrs17 import report_ui
 from hkifrs17.report_modules import (
     COMPARATIVE_MOVEMENT_IDS, EXCLUDED_CHART_METRIC_CODES, EXCLUDED_SOURCE_IDS,
-    MOVEMENT_MODULE_IDS,
+    HIDDEN_REPORT_MODULE_IDS, MOVEMENT_MODULE_IDS,
     NET_RESULT_REPORTED_LABELS,
     RATIO_MODULE_LABELS, REPORT_MODULES, SOURCE_REPORT_MODULES,
+    discount_rate_summary,
+    confidence_level_summary,
     investment_result_reconciliation, module_rows, movement_chart_rows,
     report_modules_for_rows,
 )
@@ -24,17 +29,40 @@ def test_all_applicable_step7_modules_and_hk_metrics_are_displayed():
     assert len(SOURCE_REPORT_MODULES) == 40
     assert [item.section for item in SOURCE_REPORT_MODULES[:3]] == [
         "Key financial statement analysis"] * 3
-    assert {code for module in REPORT_MODULES for code in module.metrics} >= {
+    source_or_displayed = (*REPORT_MODULES, *(
+        module for module in SOURCE_REPORT_MODULES
+        if module.module_id in HIDDEN_REPORT_MODULE_IDS
+    ))
+    assert {code for module in source_or_displayed for code in module.metrics} >= {
         code for code, metric in METRIC_BY_CODE.items()
         if metric.kind != "rate" and code not in EXCLUDED_CHART_METRIC_CODES
     }
+    assert HIDDEN_REPORT_MODULE_IDS == {"nb_margin_trend"}
+    assert not HIDDEN_REPORT_MODULE_IDS.intersection(
+        module.module_id for module in REPORT_MODULES
+    )
+    assert [(module.module_id, module.title) for module in REPORT_MODULES
+            if module.section == "Appendix"] == [
+        ("report_detail", "Insurance service result detail"),
+        ("nbv_table", "New business information"),
+    ]
     investment_return = next(item for item in REPORT_MODULES
                              if item.module_id == "inv_return")
     assert investment_return.metrics == ("INV_RETURN", "NET_INV_INCOME")
     assert investment_return.title == "Investment return"
     net_result = next(item for item in REPORT_MODULES if item.module_id == "inv_profit")
     assert net_result.metrics == ("NET_INV_RESULT",)
-    assert net_result.title == "Net investment result as reported"
+    assert net_result.title == "Net investment result"
+    net_finance = next(item for item in REPORT_MODULES if item.module_id == "uw_profit")
+    assert net_finance.metrics == ("INS_FINANCE_PL", "REINS_FINANCE_PL")
+    assert net_finance.title == "Net insurance and reinsurance finance result"
+    assert [item.module_id for item in REPORT_MODULES
+            if item.section == "Key financial statement analysis"
+            and item.subsection == "Investment"] == [
+                "inv_return", "inv_return_components",
+                "uw_profit",
+                "inv_profit", "inv_profit_components",
+            ]
     assert not any({"INV_RETURN_TOTAL", "NET_INV_RESULT_TOTAL"} & set(item.metrics)
                    for item in REPORT_MODULES)
     assert "comprehensive solvency" not in " ".join(
@@ -42,8 +70,159 @@ def test_all_applicable_step7_modules_and_hk_metrics_are_displayed():
     )
     assert RATIO_MODULE_LABELS["six_dimensional_charts"] == (
         "Return on average equity", "Insurance CSM year-on-year growth",
-        "Equity / total assets", "Investment yield", "Equity year-on-year growth",
+        "Equity / total assets", "Equity year-on-year growth",
     )
+
+
+def test_yf_note_22_spot_ranges_are_chronological_and_tenor_specific():
+    records = load_analysis_records()
+    spots = records.loc[
+        records["Company"].eq("YF Life")
+        & records["Metric code"].str.contains("_SPOT_")
+    ]
+    assert len(spots) == 40
+    assert set(spots["PDF page"]) == {133}
+    summary = discount_rate_summary(
+        records, ["YF Life"], ["2025-12-31", "2024-12-31"],
+    )
+    assert list(summary.columns) == [
+        "Company", "Currency / portfolio", "Disclosed rate", "Value form", "Year",
+        "1Y", "5Y", "10Y", "15Y", "20Y",
+    ]
+    assert set(summary["Currency / portfolio"]) == {"USD", "HKD"}
+    assert set(summary["Disclosed rate"]) == {"Adjusted spot rate"}
+    assert set(summary["Value form"]) == {"Range"}
+    selected = summary.set_index(["Currency / portfolio", "Year"])
+    assert selected.loc[("USD", "2024YE"), "1Y"] == "4.11%–4.85%"
+    assert selected.loc[("USD", "2025YE"), "1Y"] == "3.45%–4.17%"
+    assert selected.loc[("HKD", "2024YE"), "20Y"] == "3.75%–4.49%"
+    assert selected.loc[("HKD", "2025YE"), "20Y"] == "3.45%–4.17%"
+
+    missing_bound = records.loc[~(
+        records["Company"].eq("YF Life")
+        & records["Period end"].eq("2025-12-31")
+        & records["Metric code"].eq("DISCOUNT_USD_1Y_SPOT_HIGH")
+    )]
+    incomplete = discount_rate_summary(missing_bound, ["YF Life"], ["2025-12-31"])
+    assert incomplete.loc[incomplete["Currency / portfolio"].eq("USD"),
+                          "1Y"].iloc[0] == "Not disclosed"
+
+
+def test_fwd_and_sun_life_discount_rates_keep_disclosed_tenor_and_basis():
+    records = load_analysis_records()
+    summary = discount_rate_summary(
+        records, ["FWD Life Bermuda", "Sun Life Hong Kong"],
+        ["2025-12-31", "2024-12-31"],
+    )
+    assert len(summary) == 20
+    selected = summary.set_index(["Company", "Currency / portfolio", "Disclosed rate", "Year"])
+    fwd = selected.loc[("FWD Life Bermuda (Company)", "HKD",
+                        "Spot rate with illiquidity premium", "2025YE")]
+    assert fwd["1Y"] == "3.44%"
+    sun = selected.loc[("Sun Life Hong Kong (Company)", "RMB NP / RMB UL",
+                        "Illiquidity premium", "2025YE")]
+    assert sun["1Y"] == "0.40%"
+    other = selected.loc[("Sun Life Hong Kong (Company)",
+                          "Except RMB NP / RMB UL", "Illiquidity premium", "2024YE")]
+    assert other["5Y"] == "Up to 0.67%"
+    assert selected.loc[("Sun Life Hong Kong (Company)", "Except RMB NP / RMB UL",
+                         "Illiquidity premium", "2025YE"), "10Y"] == "Up to 1.12%"
+    assert other["Value form"] == "Upper limit"
+    assert not summary.loc[summary["Company"].eq("Sun Life Hong Kong (Company)"),
+                           "Disclosed rate"].eq("Spot rate with illiquidity premium").any()
+    derived = records.loc[
+        records["Company"].eq("Sun Life Hong Kong")
+        & records["Metric code"].eq("DISCOUNT_CNY_1Y_ILP")
+    ]
+    assert derived["Value status"].eq("Derived from disclosed items").all()
+    source_cells = records.loc[
+        records["Company"].eq("Sun Life Hong Kong")
+        & (records["Metric code"].str.startswith("DISCOUNT_OTHER_PORTFOLIOS_")
+           | records["Metric code"].str.endswith("_PREMIUM"))
+    ]
+    assert len(source_cells) == 30
+    assert source_cells["Value status"].eq("Reported").all()
+    assert source_cells["PDF page"].eq(106).all()
+
+
+def test_discount_rate_table_adapts_to_new_company_tenor_and_scope(monkeypatch):
+    rows = pd.DataFrame([
+        ("Company", "2024-12-31", "DISCOUNT_EUR_3Y_RF", 2.50),
+        ("Company", "2025-12-31", "DISCOUNT_EUR_3Y_RF", 2.60),
+        ("Company", "2025-12-31", "DISCOUNT_EUR_30Y_RF", 3.10),
+        ("Consolidated", "2025-12-31", "DISCOUNT_EUR_3Y_RF", 4.00),
+    ], columns=["Scope", "Period end", "Metric code", "Value (millions)"])
+    rows["Company"] = "Future Life"
+    rows["Value status"] = "Reported"
+    rows["Source label"] = "Disclosed EUR risk-free spot rate"
+    summary = discount_rate_summary(rows, ["Future Life"],
+                                    ["2024-12-31", "2025-12-31"])
+    assert summary.columns.tolist()[-2:] == ["3Y", "30Y"]
+    selected = summary.set_index(["Company", "Year"])
+    assert selected.loc[("Future Life (Company)", "2024YE"), "3Y"] == "2.50%"
+    assert selected.loc[("Future Life (Company)", "2025YE"), "30Y"] == "3.10%"
+    assert selected.loc[("Future Life (Consolidated)", "2025YE"), "3Y"] == "4.00%"
+    assert selected.loc[("Future Life (Consolidated)", "2024YE"), "3Y"] == "Not disclosed"
+
+    markup = []
+    monkeypatch.setattr(report_ui.st, "html", markup.append)
+    report_ui.render_discount_rate_table(summary, tracked_company="Future Life")
+    assert len(markup) == 2
+    assert 'discount-rate-page-start' not in markup[0]
+    assert 'discount-rate-page-start' not in markup[1]
+    assert all('<th>Currency / portfolio</th>' in part and '<th>3Y</th>' in part
+               for part in markup)
+    assert all('<th>Company</th>' not in part for part in markup)
+    assert all(part.index("2024YE") < part.index("2025YE") for part in markup)
+
+
+def test_discount_rate_print_pages_pack_short_company_tables(monkeypatch):
+    records = load_analysis_records()
+    summary = discount_rate_summary(
+        records, ["FWD Life Bermuda", "Sun Life Hong Kong", "YF Life"],
+        ["2024-12-31", "2025-12-31"],
+    )
+    assert summary.groupby("Company", sort=False).size().tolist() == [12, 8, 4]
+
+    markup = []
+    monkeypatch.setattr(report_ui.st, "html", markup.append)
+    report_ui.render_discount_rate_table(summary)
+    assert len(markup) == 3
+    assert ["discount-rate-page-start" in part for part in markup] == [
+        False, True, False,
+    ]
+
+
+def test_discount_rate_print_pages_isolate_tables_over_twelve_rows(monkeypatch):
+    company_sizes = [("Large", 13), ("Small A", 4), ("Small B", 8), ("Small C", 5)]
+    frame = pd.DataFrame(
+        [
+            (company, f"Currency {index}", "Spot rate", "Point", "2025YE", "1.00%")
+            for company, size in company_sizes for index in range(size)
+        ],
+        columns=["Company", "Currency / portfolio", "Disclosed rate",
+                 "Value form", "Year", "1Y"],
+    )
+    markup = []
+    monkeypatch.setattr(report_ui.st, "html", markup.append)
+    report_ui.render_discount_rate_table(frame)
+    assert ["discount-rate-page-start" in part for part in markup] == [
+        False, True, False, True,
+    ]
+
+
+def test_company_confidence_levels_keep_sun_life_missing_visible():
+    records = load_analysis_records()
+    summary = confidence_level_summary(
+        records, ["FWD Life Bermuda", "Sun Life Hong Kong", "YF Life"],
+        ["2025-12-31", "2024-12-31"],
+    ).set_index("Company")
+    assert list(summary.columns) == ["2024YE", "2025YE"]
+    assert summary.loc["FWD Life Bermuda (Company)"].tolist() == ["75%", "75%"]
+    assert summary.loc["YF Life (Consolidated)"].tolist() == ["75%", "75%"]
+    assert summary.loc["Sun Life Hong Kong (Company)"].tolist() == [
+        "Not disclosed", "Not disclosed",
+    ]
 
 
 def test_investment_bridge_and_reported_company_chart_labels():
@@ -165,22 +344,87 @@ def test_investment_yield_is_a_disclosed_rate_and_equity_growth_is_derived():
 
 def test_csm_source_ratios_require_matching_note_page():
     assert RATIO_MODULE_LABELS["csm_ratio_trend"] == (
-        "CSM release / opening CSM", "New business CSM / opening CSM",
+        "CSM amortization ratio", "New business CSM / CSM release",
     )
+    module = next(item for item in REPORT_MODULES if item.module_id == "csm_ratio_trend")
+    assert module.title == "CSM amortization and replenishment trends"
+    assert module.metrics == ("CSM_CLOSE", "CSM_NEW", "CSM_RELEASE")
     rows = pd.DataFrame({
         "Period end": ["2025-12-31"] * 3,
-        "Metric code": ["CSM_OPEN", "CSM_RELEASE", "CSM_NEW"],
-        "Value (millions)": [100.0, -15.0, 25.0],
+        "Metric code": ["CSM_CLOSE", "CSM_RELEASE", "CSM_NEW"],
+        "Value (millions)": [85.0, -15.0, 25.0],
         "PDF page": [62, 62, 62],
+        "Document ID": ["FILING_2025"] * 3,
+        "Scope": ["Company"] * 3,
     })
     values, _ = analytical_ratio_rows(rows)
-    found = dict(zip(values["Metric"], values["Amount"]))
-    assert found["CSM release / opening CSM"] == 15.0
-    assert found["New business CSM / opening CSM"] == 25.0
+    amortization = values.loc[values["Metric"].eq("CSM amortization ratio")].iloc[0]
+    assert amortization["Amount"] == 15.0
+    ratio = values.loc[values["Metric"].eq("New business CSM / CSM release")].iloc[0]
+    assert ratio["Amount"] == 25 / 15
+    assert ratio["Compared with 1×"] == "Above 1×"
+    rows.loc[2, "Value (millions)"] = 10.0
+    values, _ = analytical_ratio_rows(rows)
+    assert values.loc[values["Metric"].eq("New business CSM / CSM release"),
+                      "Compared with 1×"].iloc[0] == "Below 1×"
     rows.loc[2, "PDF page"] = 63
     values, gaps = analytical_ratio_rows(rows)
-    assert "New business CSM / opening CSM" not in set(values["Metric"])
-    assert "New business CSM / opening CSM" in set(gaps["Ratio"])
+    assert "CSM amortization ratio" in set(values["Metric"])
+    assert "New business CSM / CSM release" not in set(values["Metric"])
+    assert "New business CSM / CSM release" in set(gaps["Ratio"])
+    rows.loc[2, "PDF page"] = 62
+    rows.loc[1, "Value (millions)"] = 0.0
+    values, gaps = analytical_ratio_rows(rows)
+    assert values.loc[values["Metric"].eq("CSM amortization ratio"), "Amount"].iloc[0] == 0.0
+    assert "New business CSM / CSM release" not in set(values["Metric"])
+    assert "New business CSM / CSM release" in set(gaps["Ratio"])
+
+
+def test_two_csm_trend_panels_use_disclosed_years_and_100_percent_reference():
+    companies = ["FWD Life Bermuda", "Sun Life Hong Kong", "YF Life"]
+    periods = ["2024-12-31", "2025-12-31"]
+    chart, gaps, rows = csm_ratio_trend_chart(
+        load_analysis_records(), companies, periods,
+        tracked_company="FWD Life Bermuda",
+    )
+    assert chart is not None and gaps.empty
+    spec = chart.to_dict()
+    assert spec["facet"]["field"] == "Display metric"
+    assert spec["columns"] == 2
+    assert spec["resolve"]["scale"]["y"] == "independent"
+    assert spec["spec"]["layer"][0]["mark"]["type"] == "rule"
+    assert spec["spec"]["layer"][0]["mark"]["strokeDash"] == [5, 4]
+    assert spec["spec"]["layer"][1]["mark"]["type"] == "line"
+    assert spec["spec"]["layer"][1]["mark"]["strokeDash"] == [5, 4]
+    assert spec["spec"]["layer"][1]["encoding"]["opacity"]["condition"]["test"]
+    tooltip = spec["spec"]["layer"][1]["encoding"]["tooltip"]
+    assert not any(item.get("field") in {"Source", "Metric"} for item in tooltip)
+    assert len(rows) == 12
+    replenishment = rows.loc[rows["Display metric"].eq("CSM replenishment ratio")]
+    assert replenishment["Value (%)"].gt(100).all()
+    assert replenishment["Comparison"].eq("Above 100%").all()
+    fwd_2024_amortization = rows.loc[
+        rows["Company"].eq("FWD Life Bermuda")
+        & rows["Period"].eq("2024-12-31")
+        & rows["Display metric"].eq("CSM amortization ratio")
+    ].iloc[0]
+    assert fwd_2024_amortization["Value label"] == "10.30%"
+    yf_2025 = rows.loc[rows["Company"].eq("YF Life")
+                       & rows["Period"].eq("2025-12-31")]
+    assert yf_2025.loc[yf_2025["Display metric"].eq("CSM amortization ratio"),
+                       "Value (%)"].iloc[0] == pytest.approx(
+                           100 * 781.157687 / (10761.764934 + 781.157687))
+    incomplete = load_analysis_records().loc[lambda data: ~(
+        data["Company"].eq("YF Life")
+        & data["Period end"].eq("2024-12-31")
+        & data["Metric code"].eq("CSM_NEW")
+    )]
+    _, gaps, partial = csm_ratio_trend_chart(incomplete, companies, periods)
+    yf_2024 = partial.loc[partial["Company"].eq("YF Life")
+                          & partial["Period"].eq("2024-12-31")]
+    assert set(yf_2024["Display metric"]) == {"CSM amortization ratio"}
+    assert ((gaps["Company"].eq("YF Life"))
+            & (gaps["Ratio"].eq("New business CSM / CSM release"))).any()
 
 
 def test_redundant_revenue_note_chart_and_partial_profit_mix_are_hidden():

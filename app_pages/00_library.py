@@ -13,6 +13,7 @@ from hkifrs17.data import UNIT_FACTORS
 from hkifrs17.monitor import load_links, save_links, scan_link, scan_links, validate_links, workbook_bytes
 from hkifrs17.pdf import page_count, page_text
 from hkifrs17.storage import all_filings, pdf_path, register_upload
+from hkifrs17.source_templates import AUDITOR_TEMPLATES, AUDITOR_BY_DOCUMENT
 
 
 def scan_excel(frame: pd.DataFrame) -> bytes:
@@ -140,6 +141,7 @@ for item in filings:
     rows.append({"Filing": item["document_id"], "Insurer": item["company"],
                  "Legal entity": item["legal_entity"], "Scope": item["scope"],
                  "Period end": item["period_end"], "Source unit": item["source_unit"],
+                 "Auditor template": item.get("auditor_template") or AUDITOR_BY_DOCUMENT.get(item["document_id"], ""),
                  "PDF available": path.exists()})
 st.dataframe(pd.DataFrame(rows), hide_index=True)
 selected_id = st.selectbox("Inspect a filing", [item["document_id"] for item in filings],
@@ -169,6 +171,11 @@ with st.expander("Add a filing", icon=":material/upload_file:"):
             currency = st.selectbox("Source currency", ["HKD", "USD"])
             options = [unit for unit, (unit_currency, _) in UNIT_FACTORS.items() if unit_currency == currency]
             source_unit = st.selectbox("Source statement unit", options)
+        auditor_template = st.selectbox(
+            "Auditor layout template (optional)", ["", *AUDITOR_TEMPLATES],
+            format_func=lambda value: value or "Not selected",
+            help="Choose only after checking the auditor's report. The template suggests table headings; page numbers still require confirmation.",
+        )
         submitted = st.form_submit_button("Register PDF", type="primary")
     if submitted:
         try:
@@ -177,7 +184,7 @@ with st.expander("Add a filing", icon=":material/upload_file:"):
             item = register_upload(pdf.getvalue(), filename=pdf.name, company=company,
                                    legal_entity=legal_entity, scope=scope,
                                    period_end=period_end.isoformat(), currency=currency,
-                                   source_unit=source_unit)
+                                   source_unit=source_unit, auditor_template=auditor_template)
             st.success(f"Registered {item['document_id']}. Locate pages in Step 1.")
             st.rerun()
         except Exception as exc:

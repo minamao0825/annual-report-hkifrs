@@ -2,3 +2,10 @@ __pycache__/
 *.py[cod]
 *.log
 data/drafts/.records_*.xlsx
+.pytest_cache/
+_codex_backup*/
+data/page_text_cache/
+tmp/
+.env
+.env.*
+.streamlit/secrets.toml

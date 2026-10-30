@@ -1,0 +1,38 @@
+[
+  {
+    "document_id": "FWD_2025", "period": "2025-12-31", "company": "FWD Life Bermuda", "scope": "Company", "currency": "USD",
+    "source_document_id": "FWD_2025", "note": "FWD 2025 financial statements, Note 5, PDF p.52",
+    "return": {"interest": 727.920, "other": 93.956, "impairment": -5.123, "oci": 433.551, "total": 1250.304},
+    "result": {"investment_return": 1250.304, "insurance_finance": -1173.408, "reinsurance_finance": 39.335, "investment_contract_liabilities": -2.697, "total": 113.534, "oci_result": 95.673}
+  },
+  {
+    "document_id": "FWD_2024", "period": "2024-12-31", "company": "FWD Life Bermuda", "scope": "Company", "currency": "USD",
+    "source_document_id": "FWD_2025", "note": "FWD 2025 financial statements, Note 5, 2024 comparative, PDF p.52",
+    "return": {"interest": 515.407, "other": -145.153, "impairment": -7.842, "oci": -79.709, "total": 282.703},
+    "result": {"investment_return": 282.703, "insurance_finance": -274.701, "reinsurance_finance": -17.763, "investment_contract_liabilities": -0.974, "total": -10.735, "oci_result": -28.003}
+  },
+  {
+    "document_id": "SUN_2025", "period": "2025-12-31", "company": "Sun Life Hong Kong", "scope": "Company", "currency": "HKD",
+    "source_document_id": "SUN_2025", "note": "Sun Life 2025 financial statements, Note 10, PDF pp.83–85; P&L only",
+    "return": {"interest": 4248, "dividend_other": 86, "gains": 8091, "liability_within_income": -39, "credit_loss_reversal": 1, "write_off": -286, "subsidiary_dividend": 550, "total": 12651},
+    "result": {"investment_return": 12651, "insurance_finance": -11929, "reinsurance_finance": -201, "total": 521}
+  },
+  {
+    "document_id": "SUN_2025", "period": "2024-12-31", "company": "Sun Life Hong Kong", "scope": "Company", "currency": "HKD",
+    "source_document_id": "SUN_2025", "note": "Sun Life 2025 financial statements, Note 10, unaudited 2024 company comparative, PDF pp.84–85; P&L only",
+    "return": {"interest": 3571, "dividend_other": 182, "gains": -51, "liability_within_income": 9, "credit_loss_reversal": 3, "write_off": -63, "subsidiary_dividend": 235, "total": 3886},
+    "result": {"investment_return": 3886, "insurance_finance": -4490, "reinsurance_finance": 865, "total": 261}
+  },
+  {
+    "document_id": "YF_2025", "period": "2025-12-31", "company": "YF Life", "scope": "Consolidated", "currency": "HKD",
+    "source_document_id": "YF_2025", "note": "YF 2025 financial statements, Note 6, PDF p.98",
+    "return": {"interest": 3130.126505, "other": 3112.110845, "impairment": -119.359240, "oci": 785.780024, "total": 6908.658134},
+    "result": {"investment_return": 6908.658134, "insurance_finance": -5797.465390, "reinsurance_finance": 459.575317, "investment_contract_liabilities": -231.471307, "total": 1339.296754}
+  },
+  {
+    "document_id": "YF_2024", "period": "2024-12-31", "company": "YF Life", "scope": "Consolidated", "currency": "HKD",
+    "source_document_id": "YF_2025", "note": "YF 2025 financial statements, Note 6, 2024 comparative including investment OCI, PDF p.98",
+    "return": {"interest": 2998.877032, "other": 827.701502, "impairment": -120.180389, "oci": -1236.050920, "total": 2470.347225},
+    "result": {"investment_return": 2470.347225, "insurance_finance": -3146.612498, "reinsurance_finance": 427.817505, "investment_contract_liabilities": -203.145285, "total": -451.593053}
+  }
+]

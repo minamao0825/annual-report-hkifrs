@@ -8,6 +8,7 @@ import math
 import pandas as pd
 
 from .catalog import METRIC_BY_CODE
+from .csm_signs import orient_csm_values
 from .fx import year_end_usd_hkd
 
 
@@ -16,9 +17,14 @@ COLUMNS = [
     "Metric code", "Metric", "Section", "Original value", "Source unit", "Currency",
     "Value (millions)", "Value status", "PDF page", "Source label", "Audit status",
     "Review status", "Reviewer note",
+    "Source table heading", "Source row", "Column heading", "Table year",
+    "Unit evidence", "Evidence box",
 ]
+LEGACY_COLUMNS = COLUMNS[:-6]
 REVIEW_STATUSES = ("Pending", "Verified", "Excluded")
-VALUE_STATUSES = ("Reported", "Not disclosed", "Not applicable")
+VALUE_STATUSES = ("Reported", "Derived from disclosed items", "Not disclosed", "Not applicable")
+NUMERIC_VALUE_STATUSES = frozenset({"Reported", "Derived from disclosed items"})
+DATA_WORKFLOW_VERSION = 2
 UNIT_FACTORS = {
     "HKD": ("HKD", 1e-6),
     "HKD thousands": ("HKD", 1e-3),
@@ -55,11 +61,16 @@ def normalize_records(frame: pd.DataFrame, filings: list[dict]) -> pd.DataFrame:
     """Validate source identity and recompute chart values from reviewed originals."""
     if frame is None or frame.empty:
         return empty_records()
-    missing = set(COLUMNS) - set(frame.columns)
+    missing = set(LEGACY_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError("Missing columns: " + ", ".join(sorted(missing)))
     documents = {item["document_id"]: item for item in filings}
-    result = frame[COLUMNS].copy().reset_index(drop=True)
+    result = frame.copy()
+    for column in COLUMNS[len(LEGACY_COLUMNS):]:
+        if column not in result:
+            result[column] = ""
+    result = result[COLUMNS].copy().reset_index(drop=True)
+    result[COLUMNS[len(LEGACY_COLUMNS):]] = result[COLUMNS[len(LEGACY_COLUMNS):]].astype(object)
     for idx, row in result.iterrows():
         document_id = str(row["Document ID"]).strip()
         document = documents.get(document_id)
@@ -92,12 +103,12 @@ def normalize_records(frame: pd.DataFrame, filings: list[dict]) -> pd.DataFrame:
         if status not in VALUE_STATUSES or review not in REVIEW_STATUSES:
             raise ValueError(f"Row {idx + 2}: invalid value or review status.")
         original = as_number(row["Original value"])
-        if status == "Reported" and original is None:
-            raise ValueError(f"Row {idx + 2}: a reported item needs a numeric original value.")
-        if status != "Reported" and original is not None:
+        if status in NUMERIC_VALUE_STATUSES and original is None:
+            raise ValueError(f"Row {idx + 2}: a reported or derived item needs a numeric original value.")
+        if status not in NUMERIC_VALUE_STATUSES and original is not None:
             raise ValueError(f"Row {idx + 2}: a non-reported item must have a blank value.")
         raw_page = row["PDF page"]
-        if status != "Reported" and (pd.isna(raw_page) or str(raw_page).strip() == ""):
+        if status not in NUMERIC_VALUE_STATUSES and (pd.isna(raw_page) or str(raw_page).strip() == ""):
             page = None
         else:
             try:
@@ -126,12 +137,14 @@ def normalize_records(frame: pd.DataFrame, filings: list[dict]) -> pd.DataFrame:
         result.at[idx, "Review status"] = review
         result.at[idx, "Value status"] = status
         result.at[idx, "Source unit"] = unit
-        for column in ("Source label", "Audit status", "Reviewer note"):
+        for column in ("Source label", "Audit status", "Reviewer note",
+                       "Source table heading", "Source row", "Column heading",
+                       "Table year", "Unit evidence", "Evidence box"):
             result.at[idx, column] = "" if pd.isna(row[column]) else str(row[column]).strip()
     keys = ["Document ID", "Period end", "Metric code"]
     if result.duplicated(keys).any():
         raise ValueError("Duplicate document / period / metric cells must be resolved before saving.")
-    return result
+    return orient_csm_values(result)
 
 
 def standardize_hkd(result: pd.DataFrame) -> pd.DataFrame:
@@ -168,10 +181,18 @@ def standardize_hkd(result: pd.DataFrame) -> pd.DataFrame:
 
 def verified_records(frame: pd.DataFrame, filings: list[dict]) -> pd.DataFrame:
     rows = normalize_records(frame, filings)
-    return rows[(rows["Review status"] == "Verified") & (rows["Value status"] == "Reported")].copy()
+    return rows[(rows["Review status"] == "Verified") &
+                rows["Value status"].isin(NUMERIC_VALUE_STATUSES)].copy()
+
+
+def check_candidates(frame: pd.DataFrame, filings: list[dict]) -> pd.DataFrame:
+    """Numeric extracted cells, including Pending, for Step 3 screening."""
+    rows = normalize_records(frame, filings)
+    return rows[rows["Review status"].isin(("Pending", "Verified")) &
+                rows["Value status"].isin(NUMERIC_VALUE_STATUSES)].copy()
 
 
 def reconciliation_checks(frame: pd.DataFrame, filings: list[dict], plan: pd.DataFrame | None = None,
-                          *, verified_only: bool = False) -> pd.DataFrame:
+                          *, verified_only: bool = False, automatic: bool = False) -> pd.DataFrame:
     from .checks import evaluate_checks
-    return evaluate_checks(frame, filings, plan, verified_only=verified_only)
+    return evaluate_checks(frame, filings, plan, verified_only=verified_only, automatic=automatic)

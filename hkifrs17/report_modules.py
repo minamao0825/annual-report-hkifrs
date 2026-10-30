@@ -8,6 +8,7 @@ import re
 import pandas as pd
 
 from .catalog import INSURER_CHART_GROUPS, METRIC_BY_CODE
+from .charts import analytical_ratio_rows
 from .metric_blueprint import CHART_REQUIREMENTS
 
 
@@ -22,7 +23,23 @@ class ReportModule:
     note: str = ""
 
 
+def module_company_disclosure_notes(module_id: str, companies) -> list[str]:
+    """Keep source-specific explanations tied to displayed insurers."""
+    names = set(companies)
+    notes = []
+    if module_id == "inv_return" and "Sun Life Hong Kong" in names:
+        notes.append("Sun Life Hong Kong: investment return uses net investment income.")
+    if module_id == "csm_maturity_table" and "FWD Life Bermuda" in names:
+        notes.append(
+            "FWD Life Bermuda: the disclosed over-10-years bucket is retained; "
+            "the mainland template's 10–20 and over-20 buckets are not inferred."
+        )
+    return notes
+
+
 EXCLUDED_SOURCE_IDS = frozenset({"exp_struct", "csm_equity"})
+# Retain source cells and extraction coverage while removing these displays.
+HIDDEN_REPORT_MODULE_IDS = frozenset({"nb_margin_trend"})
 EXCLUDED_CHART_METRIC_CODES = frozenset({"INV_RETURN_TOTAL", "NET_INV_RESULT_TOTAL"})
 NET_RESULT_REPORTED_LABELS = {
     "FWD Life Bermuda": "Net investment result",
@@ -31,13 +48,49 @@ NET_RESULT_REPORTED_LABELS = {
 }
 RATIO_MODULE_LABELS = {
     "csm_ratio": ("Insurance CSM / matching fulfilment cash flows",),
-    "csm_ratio_trend": ("CSM release / opening CSM", "New business CSM / opening CSM"),
-    "nb_margin_trend": ("New profitable contract CSM / PV inflows",),
+    "csm_ratio_trend": ("CSM amortization ratio", "New business CSM / CSM release"),
     "six_dimensional_charts": (
         "Return on average equity", "Insurance CSM year-on-year growth",
-        "Equity / total assets", "Investment yield", "Equity year-on-year growth",
+        "Equity / total assets", "Equity year-on-year growth",
     ),
 }
+
+
+def financial_performance_ratio_table(rows: pd.DataFrame, companies: list[str],
+                                      periods: list[str]) -> pd.DataFrame:
+    """Show the four selected ratios by insurer and year, including missing cells."""
+    selected_periods = sorted({str(period) for period in periods})
+    headers = [f"{pd.Timestamp(period).year}YE" for period in selected_periods]
+    columns = ["Company", "Indicator", *headers]
+    if not companies:
+        return pd.DataFrame(columns=columns)
+    output = []
+    for company in companies:
+        company_rows = rows.loc[rows["Company"].eq(company)
+                                & rows["Period end"].astype(str).isin(selected_periods)]
+        scopes = list(dict.fromkeys(
+            str(scope).title() for scope in company_rows["Scope"].dropna()
+            if str(scope).strip()
+        )) or [""]
+        base_name = re.sub(r"\s*\((?:Company|Consolidated)\)$", "", company,
+                           flags=re.IGNORECASE)
+        for scope in scopes:
+            scoped_rows = (company_rows.loc[company_rows["Scope"].astype(str).str.lower()
+                                            .eq(scope.lower())]
+                           if scope else company_rows)
+            values, _ = analytical_ratio_rows(scoped_rows)
+            label = f"{base_name} ({scope})" if scope else base_name
+            for indicator in RATIO_MODULE_LABELS["six_dimensional_charts"]:
+                entry = {"Company": label, "Indicator": indicator}
+                for period, header in zip(selected_periods, headers):
+                    match = values.loc[
+                        values["Period"].eq(period) & values["Metric"].eq(indicator),
+                        "Amount",
+                    ] if not values.empty else pd.Series(dtype=float)
+                    entry[header] = (f"{float(match.iloc[0]):.2f}%" if len(match) == 1
+                                     else "Unavailable")
+                output.append(entry)
+    return pd.DataFrame(output, columns=columns)
 PERFORMANCE_RATIO_PAGE_GROUPS = (
     ("Return and CSM growth", (
         "Return on average equity", "Insurance CSM year-on-year growth",
@@ -49,7 +102,7 @@ PERFORMANCE_RATIO_PAGE_GROUPS = (
 YEAR_COLORED_MODULE_IDS = frozenset({
     "inc_total", "net_profit", "exp_total", "perf_total", "oci_profit",
     "total_profit", "asset_trend",
-    "csm_bal", "csm_ratio", "nb_csm", "nb_lost", "nb_margin_trend",
+    "csm_bal", "csm_ratio", "nb_csm", "nb_lost",
     "confidence_level", "hk_insurance_revenue_detail", "inv_return", "inv_profit",
     "hk_investment",
     "hk_financial_position", "hk_csm", "hk_reinsurance_csm_release",
@@ -57,23 +110,23 @@ YEAR_COLORED_MODULE_IDS = frozenset({
 COMPANY_YEAR_COMPARISON_IDS = frozenset({
     "inc_total", "exp_total", "perf_total", "net_profit",
     "inv_return", "inv_profit", "oci_profit", "total_profit", "asset_trend",
-    "csm_bal", "csm_ratio", "nb_csm", "nb_lost", "nb_margin_trend",
+    "csm_bal", "csm_ratio", "nb_csm", "nb_lost",
 })
 HOVER_ONLY_LABEL_MODULE_IDS = frozenset({
-    "csm_trans", "nb_struct", "asset_struct", "report_detail", "nbv_table",
+    "asset_struct",
 })
 STACKED_AMOUNT_MODULE_IDS = frozenset({
-    "prof_2025", "prof_2024", "uw_profit", "oci_deep",
+    "prof_2025", "prof_2024", "exp_1",
 })
 # These are reported subtotals of the plotted components. Plotting them as
 # another stack segment would count the underlying amounts twice.
 STACKED_AMOUNT_TOTAL_CODES = {
     "prof_2025": frozenset({"INS_SERVICE_RESULT"}),
     "prof_2024": frozenset({"INS_SERVICE_RESULT"}),
-    "uw_profit": frozenset({"INS_FINANCE_TOTAL", "REINS_FINANCE_TOTAL"}),
 }
 TABLE_MODULE_IDS = frozenset({
-    "summary_table", "confidence_level",
+    "summary_table", "confidence_level", "csm_rollforward_table",
+    "equity_movement_table",
 })
 LATEST_YEAR_IDS = frozenset({"prof_2025", "oci_year_lat", "csm_comp_lat"})
 PRIOR_YEAR_IDS = frozenset({"prof_2024", "oci_year_pre", "csm_comp_pre"})
@@ -121,13 +174,64 @@ SUPPLEMENTARY_MODULES = tuple(
     for group, codes in INSURER_CHART_GROUPS
     if any(code not in _source_codes | EXCLUDED_CHART_METRIC_CODES for code in codes)
 )
-REPORT_MODULES = SOURCE_REPORT_MODULES + SUPPLEMENTARY_MODULES
+INVESTMENT_COMPONENT_MODULES = {
+    "inv_return": ReportModule(
+        "inv_return_components", "Key financial statement analysis", "Investment",
+        "Investment return components", ("INV_RETURN", "NET_INV_INCOME"),
+    ),
+    "inv_profit": ReportModule(
+        "inv_profit_components", "Key financial statement analysis", "Investment",
+        "Investment result components", ("NET_INV_RESULT",),
+    ),
+}
+CSM_ROLLFORWARD_MODULE = ReportModule(
+    "csm_rollforward_table", "Key financial statement analysis", "CSM",
+    "CSM balance roll-forward table",
+    ("CSM_OPEN", "CSM_NEW", "CSM_FINANCE_CHANGE",
+     "CSM_ESTIMATE_CHANGE", "CSM_RELEASE", "CSM_CLOSE"),
+)
+NEW_BUSINESS_RATIOS_MODULE = ReportModule(
+    "nb_value_ratios", "Key financial statement analysis", "New business",
+    "New business value ratios (CSM margin / loss ratio / RA ratio)",
+    ("NB_INS_PROFIT_CSM", "NB_INS_PROFIT_PV_IN", "NB_INS_ONEROUS_LOSS",
+     "NB_INS_ONEROUS_PV_IN", "NB_INS_PROFIT_RA", "NB_INS_ONEROUS_RA"),
+    "ratio",
+)
+NET_ASSETS_MODULE = ReportModule(
+    "equity_balance_comparison", "Key financial statement analysis", "Equity",
+    "Net Assets", ("EQUITY",),
+)
+EQUITY_MOVEMENT_TABLE_MODULE = ReportModule(
+    "equity_movement_table", "Key financial statement analysis", "Equity",
+    "Net assets movement detail table",
+    ("EQUITY_OPEN", "PROFIT", "OCI_TOTAL", "EQUITY_DIVIDENDS",
+     "EQUITY_NEW_CAPITAL", "EQUITY_OTHER", "EQUITY"),
+)
+
+
+def _source_modules_with_components():
+    for module in SOURCE_REPORT_MODULES:
+        if module.module_id in HIDDEN_REPORT_MODULE_IDS:
+            continue
+        if module.module_id == "equity_trend":
+            yield NET_ASSETS_MODULE
+            yield EQUITY_MOVEMENT_TABLE_MODULE
+        yield module
+        if module.module_id == "csm_table":
+            yield CSM_ROLLFORWARD_MODULE
+        if module.module_id == "nb_lost":
+            yield NEW_BUSINESS_RATIOS_MODULE
+        if module.module_id in INVESTMENT_COMPONENT_MODULES:
+            yield INVESTMENT_COMPONENT_MODULES[module.module_id]
+
+
+REPORT_MODULES = tuple(_source_modules_with_components()) + SUPPLEMENTARY_MODULES
 MOVEMENT_MODULE_IDS = frozenset(
     module.module_id for module in REPORT_MODULES
     if "movement" in module.title.lower()
 )
 LATEST_YEAR_CHART_IDS = MOVEMENT_MODULE_IDS | LATEST_YEAR_IDS | {
-    "nb_struct", "csm_maturity_table",
+    "csm_maturity_table", "csm_rollforward_table",
 }
 COMPARATIVE_MOVEMENT_IDS = frozenset(
     module.module_id for module in REPORT_MODULES
@@ -171,23 +275,125 @@ def movement_chart_rows(rows: pd.DataFrame, module: ReportModule) -> pd.DataFram
 
 def discount_rate_summary(rows: pd.DataFrame, companies: list[str],
                           periods: list[str]) -> pd.DataFrame:
-    """Summarize disclosed tenor ranges without combining currencies or bases."""
-    selected_periods = sorted({str(period) for period in periods}, reverse=True)
-    month_names = ("January", "February", "March", "April", "May", "June",
-                   "July", "August", "September", "October", "November", "December")
-    headers = []
-    for period in selected_periods:
-        date = pd.Timestamp(period)
-        headers.append(f"{date.day} {month_names[date.month - 1]} {date.year}")
-    if rows.empty:
-        return pd.DataFrame(columns=["Company", *headers])
-    codes = rows["Metric code"].astype(str)
-    parsed = codes.str.extract(r"^DISCOUNT_(CNY|HKD|USD)_(1Y|5Y|10Y|15Y|20Y)_(RF|ILP)$")
-    rates = rows.loc[parsed[0].notna()].copy()
-    if not rates.empty:
-        rates[["Rate currency", "Tenor", "Basis"]] = parsed.loc[parsed[0].notna()].to_numpy()
-        rates["Rate"] = pd.to_numeric(rates["Value (millions)"], errors="coerce")
-        rates = rates.dropna(subset=["Rate"])
+    """Put disclosed rate forms on separate, year-adjacent tenor rows."""
+    selected_periods = sorted({str(period) for period in periods})
+    leading = ["Company", "Currency / portfolio", "Disclosed rate", "Value form", "Year"]
+    if rows.empty or not companies or not selected_periods:
+        return pd.DataFrame(columns=leading)
+
+    # A new insurer can reuse the same rate-code grammar without a display rule
+    # based on its name. The available tenor columns come from the selected data.
+    pattern = re.compile(
+        r"^DISCOUNT_(?P<scope>.+)_(?P<tenor>\d+(?:\.\d+)?[DWMY])_"
+        r"(?P<basis>PREMIUM_UP_TO|SPOT_LOW|SPOT_HIGH|PREMIUM|ILP|RF)$"
+    )
+    basis_labels = {
+        "RF": ("Risk-free spot rate", "Point"),
+        "ILP": ("Spot rate with illiquidity premium", "Point"),
+        "PREMIUM": ("Illiquidity premium", "Point"),
+        "PREMIUM_UP_TO": ("Illiquidity premium", "Upper limit"),
+        "SPOT_LOW": ("Adjusted spot rate", "Range"),
+        "SPOT_HIGH": ("Adjusted spot rate", "Range"),
+    }
+    rates = rows.loc[
+        rows["Company"].isin(companies)
+        & rows["Period end"].astype(str).isin(selected_periods)
+        & rows["Metric code"].astype(str).str.startswith("DISCOUNT_")
+    ].copy()
+    rates["Rate"] = pd.to_numeric(rates["Value (millions)"], errors="coerce")
+    rates = rates.dropna(subset=["Rate"])
+    if "Value status" in rates:
+        rates = rates.loc[rates["Value status"].eq("Reported")]
+    parsed = []
+    for _, row in rates.iterrows():
+        match = pattern.fullmatch(str(row["Metric code"]))
+        if not match:
+            continue
+        item = row.to_dict()
+        item.update(match.groupdict())
+        label, value_form = basis_labels[item["basis"]]
+        item["Disclosed rate"] = label
+        item["Value form"] = value_form
+        source = str(row.get("Source label", "")).lower()
+        if "except rmb np" in source and "rmb ul" in source:
+            item["Currency / portfolio"] = "Except RMB NP / RMB UL"
+        elif "rmb np" in source and "rmb ul" in source:
+            item["Currency / portfolio"] = "RMB NP / RMB UL"
+        elif item["scope"] == "OTHER_PORTFOLIOS":
+            item["Currency / portfolio"] = "Other portfolios"
+        else:
+            item["Currency / portfolio"] = item["scope"].replace("_", " ")
+        parsed.append(item)
+    if not parsed:
+        return pd.DataFrame(columns=leading)
+    detail = pd.DataFrame(parsed)
+    detail["Reporting scope"] = (detail["Scope"].fillna("").astype(str).str.strip().str.title()
+                                  if "Scope" in detail else "")
+
+    def tenor_key(tenor: str) -> float:
+        number, unit = float(tenor[:-1]), tenor[-1]
+        return number * {"D": 1 / 365, "W": 7 / 365, "M": 1 / 12, "Y": 1}[unit]
+
+    tenors = sorted(detail["tenor"].unique(), key=lambda tenor: (tenor_key(tenor), tenor))
+    output = []
+    for company in companies:
+        base_name = re.sub(r"\s*\((?:Company|Consolidated)\)$", "", company,
+                           flags=re.IGNORECASE)
+        company_rates = detail.loc[detail["Company"].eq(company)]
+        key_columns = ["Reporting scope", "Currency / portfolio", "Disclosed rate", "Value form"]
+        keys = company_rates[key_columns].drop_duplicates().copy()
+        scope_order = dict(enumerate(company_rates["Reporting scope"].drop_duplicates()))
+        portfolio_order = dict(enumerate(company_rates["Currency / portfolio"].drop_duplicates()))
+        keys["_scope_order"] = keys["Reporting scope"].map({value: rank for rank, value in scope_order.items()})
+        keys["_portfolio_order"] = keys["Currency / portfolio"].map(
+            {value: rank for rank, value in portfolio_order.items()}
+        )
+        keys["_basis_order"] = keys["Disclosed rate"].map({
+            "Risk-free spot rate": 0, "Illiquidity premium": 1,
+            "Spot rate with illiquidity premium": 2, "Adjusted spot rate": 3,
+        }).fillna(9)
+        keys = keys.sort_values(["_scope_order", "_portfolio_order", "_basis_order"],
+                                kind="stable")
+        for _, key in keys.iterrows():
+            subset = company_rates.loc[
+                company_rates["Reporting scope"].eq(key["Reporting scope"])
+                & company_rates["Currency / portfolio"].eq(key["Currency / portfolio"])
+                & company_rates["Disclosed rate"].eq(key["Disclosed rate"])
+                & company_rates["Value form"].eq(key["Value form"])
+            ]
+            scope = key["Reporting scope"]
+            company_label = f"{base_name} ({scope})" if scope else base_name
+            for period in selected_periods:
+                year_rates = subset.loc[subset["Period end"].astype(str).eq(period)]
+                entry = {"Company": company_label,
+                         "Currency / portfolio": key["Currency / portfolio"],
+                         "Disclosed rate": key["Disclosed rate"],
+                         "Value form": key["Value form"],
+                         "Year": f"{pd.Timestamp(period).year}YE"}
+                for tenor in tenors:
+                    tenor_rates = year_rates.loc[year_rates["tenor"].eq(tenor)]
+                    if key["Value form"] == "Range":
+                        lower = tenor_rates.loc[tenor_rates["basis"].eq("SPOT_LOW"), "Rate"]
+                        upper = tenor_rates.loc[tenor_rates["basis"].eq("SPOT_HIGH"), "Rate"]
+                        entry[tenor] = (f"{lower.iloc[0]:.2f}%–{upper.iloc[0]:.2f}%"
+                                        if len(lower) == len(upper) == 1
+                                        and lower.iloc[0] <= upper.iloc[0]
+                                        else "Not disclosed")
+                    elif len(tenor_rates) == 1:
+                        value = f"{tenor_rates['Rate'].iloc[0]:.2f}%"
+                        entry[tenor] = (f"Up to {value}" if key["Value form"] == "Upper limit"
+                                        else value)
+                    else:
+                        entry[tenor] = "Not disclosed"
+                output.append(entry)
+    return pd.DataFrame(output, columns=[*leading, *tenors])
+
+
+def confidence_level_summary(rows: pd.DataFrame, companies: list[str],
+                             periods: list[str]) -> pd.DataFrame:
+    """Keep insurers without a disclosed numerical RA confidence level visible."""
+    selected_periods = sorted({str(period) for period in periods})
+    headers = [f"{pd.Timestamp(period).year}YE" for period in selected_periods]
     output = []
     for company in companies:
         company_rows = rows.loc[rows["Company"].eq(company)]
@@ -200,33 +406,23 @@ def discount_rate_summary(rows: pd.DataFrame, companies: list[str],
         label = f"{base_name} ({' / '.join(scopes)})" if scopes else company
         entry = {"Company": label}
         for period, header in zip(selected_periods, headers):
-            selected = rates.loc[
-                rates["Company"].eq(company) & rates["Period end"].astype(str).eq(period)
-            ] if not rates.empty else rates
-            lines = []
-            for currency in ("CNY", "HKD", "USD"):
-                for basis, basis_label in (("RF", "Risk-free"),
-                                           ("ILP", "With illiquidity premium")):
-                    values = selected.loc[
-                        selected["Rate currency"].eq(currency) & selected["Basis"].eq(basis),
-                        "Rate",
-                    ] if not selected.empty else pd.Series(dtype=float)
-                    if values.empty:
-                        continue
-                    lower, upper = float(values.min()), float(values.max())
-                    rate_range = (f"{lower:.2f}%" if abs(lower - upper) < 1e-9 else
-                                  f"{lower:.2f}%–{upper:.2f}%")
-                    lines.append(f"{currency} · {basis_label}: {rate_range}")
-            entry[header] = "\n".join(lines) if lines else "Not disclosed"
+            matching = company_rows.loc[
+                company_rows["Period end"].astype(str).eq(period)
+                & company_rows["Metric code"].eq("RA_CONFIDENCE_PCT")
+            ]
+            values = pd.to_numeric(matching["Value (millions)"], errors="coerce").dropna()
+            entry[header] = (f"{float(values.iloc[0]):g}%" if len(values) == 1
+                             else "Not disclosed")
         output.append(entry)
     return pd.DataFrame(output, columns=["Company", *headers])
 
 
 def report_modules_for_rows(rows: pd.DataFrame) -> tuple[ReportModule, ...]:
     """Omit charts whose selected data would repeat another chart exactly."""
+    hidden_ids = COMPARATIVE_MOVEMENT_IDS
     if rows.empty:
         return tuple(module for module in REPORT_MODULES
-                     if module.module_id not in COMPARATIVE_MOVEMENT_IDS)
+                     if module.module_id not in hidden_ids)
     note = rows.loc[rows["Metric code"].eq("INS_REVENUE_NOTE_TOTAL"),
                     ["Document ID", "Period end", "Value (millions)"]]
     statement = rows.loc[rows["Metric code"].eq("INS_REVENUE"),
@@ -242,7 +438,7 @@ def report_modules_for_rows(rows: pd.DataFrame) -> tuple[ReportModule, ...]:
     )
     return tuple(
         module for module in REPORT_MODULES
-        if module.module_id not in COMPARATIVE_MOVEMENT_IDS
+        if module.module_id not in hidden_ids
         and not (module.module_id == "hk_insurance_revenue_detail" and repeated_revenue_total)
         and not (module.module_id == "prof_mix" and module_rows(rows, module).empty)
     )
@@ -304,8 +500,15 @@ def validate_report_modules() -> None:
         raise ValueError("Duplicate report module ID.")
     amount_codes = {code for code, item in METRIC_BY_CODE.items() if item.kind != "rate"}
     displayed = {code for item in REPORT_MODULES for code in item.metrics}
-    if not (amount_codes - EXCLUDED_CHART_METRIC_CODES).issubset(displayed):
-        raise ValueError("Some disclosed amount indicators have no report module.")
+    retained_in_source = {
+        code for item in SOURCE_REPORT_MODULES
+        if item.module_id in HIDDEN_REPORT_MODULE_IDS
+        for code in item.metrics
+    }
+    if not (amount_codes - EXCLUDED_CHART_METRIC_CODES).issubset(
+        displayed | retained_in_source
+    ):
+        raise ValueError("Some disclosed amount indicators have no report module or source inventory.")
 
 
 validate_report_modules()
